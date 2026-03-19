@@ -490,14 +490,14 @@ def generate_chains(incidents: dict, pools: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _load_paraphraser():
-    """Carga flan-t5-small una sola vez y lo devuelve (o None si falla)."""
+    """Carga flan-t5-small una sola vez y lo devuelve como (tokenizer, model) o None si falla."""
     try:
-        from transformers import pipeline as hf_pipeline
-        return hf_pipeline(
-            "text2text-generation",
-            model="google/flan-t5-small",
-            max_new_tokens=80,
-        )
+        from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+        model_name = "google/flan-t5-small"
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        model.eval()
+        return (tokenizer, model)
     except Exception as e:
         print(f"[HF] No se pudo cargar el modelo: {e}")
         return None
@@ -508,13 +508,18 @@ def _paraphrase_question(paraphraser, question_text: str) -> Optional[str]:
     Pide al modelo que reformule el enunciado manteniendo los nombres de entidad.
     Devuelve el texto reformulado o None si falla / no cambia nada.
     """
+    tokenizer, model = paraphraser
     prompt = (
         "Paraphrase the following question in Spanish "
         "keeping entity names unchanged: "
         + question_text
     )
     try:
-        result = paraphraser(prompt)[0]["generated_text"].strip()
+        import torch
+        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=256)
+        with torch.no_grad():
+            outputs = model.generate(**inputs, max_new_tokens=80)
+        result = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
         return result if result and result != question_text else None
     except Exception:
         return None
@@ -767,13 +772,13 @@ def main():
 
     # (Opcional) Parafraseo con HuggingFace — activa poniendo n > 0
     # Requiere RAM/GPU suficiente para cargar flan-t5-small (~300 MB)
-    qa_1hop += paraphrase_1hop_with_hf(qa_1hop, n_to_paraphrase=0)
+    qa_1hop += paraphrase_1hop_with_hf(qa_1hop, n_to_paraphrase=200)
 
     # Multi-hop: cadenas conversacionales secuenciales
     chains = generate_chains(incidents, pools)
     print(f"      cadenas multi-hop: {len(chains)}")
 
-    chains += paraphrase_chains_with_hf(chains, n_to_paraphrase=0)
+    chains += paraphrase_chains_with_hf(chains, n_to_paraphrase=200)
 
     total_qa = len(qa_1hop) + sum(len(c["steps"]) for c in chains)
     if total_qa < TARGET_QA:
