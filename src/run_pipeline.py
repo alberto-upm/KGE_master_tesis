@@ -76,10 +76,11 @@ def run_phase5():
     print("No tiene ejecución standalone. Ejecuta las fases 4 o 6 para activarla.")
 
 
-def run_phase6(n_samples=None, model_name=None, device=cfg.DEVICE):
+def run_phase6(n_samples=None, n_chains=None, model_name=None, device=cfg.DEVICE):
     from phase6_validation import run
     run(
-        n_samples=n_samples or cfg.EVAL_SAMPLE_N,
+        n_samples=n_samples  or cfg.EVAL_SAMPLE_N,
+        n_chains=n_chains    or cfg.EVAL_SAMPLE_N,
         model_name=model_name or cfg.DEFAULT_MODEL,
         device=device,
     )
@@ -120,7 +121,9 @@ def main():
                         help="ID de incidencia para sesión interactiva")
     # Opciones Phase 6
     parser.add_argument("--n-samples",   type=int, default=None,
-                        help=f"Nº de muestras a evaluar (default: {cfg.EVAL_SAMPLE_N})")
+                        help=f"Nº de preguntas 1-hop a evaluar (default: {cfg.EVAL_SAMPLE_N})")
+    parser.add_argument("--n-chains",    type=int, default=None,
+                        help=f"Nº de cadenas multi-hop a evaluar (default: {cfg.EVAL_SAMPLE_N})")
 
     args = parser.parse_args()
     phase = args.phase
@@ -154,6 +157,7 @@ def main():
         elif p == "6":
             run_phase6(
                 n_samples=args.n_samples,
+                n_chains=args.n_chains,
                 model_name=args.model,
                 device=args.device,
             )
