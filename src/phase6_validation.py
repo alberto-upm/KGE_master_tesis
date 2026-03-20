@@ -65,7 +65,14 @@ def token_f1(prediction: str, reference: str) -> float:
 def evaluate_bertscore(generated: list[str], references: list[str]) -> dict:
     try:
         from bert_score import score as bert_score_fn
-        P, R, F1 = bert_score_fn(generated, references, lang="es", verbose=False)
+        # xlm-roberta-base: multilingüe, tokenizador sentencepiece compatible
+        # con todas las versiones de transformers (evita el bug de BertTokenizer
+        # con build_inputs_with_special_tokens en transformers>=4.40)
+        P, R, F1 = bert_score_fn(
+            generated, references,
+            model_type="xlm-roberta-base",
+            verbose=False,
+        )
         return {
             "precision": round(P.mean().item(), 4),
             "recall":    round(R.mean().item(), 4),
@@ -73,6 +80,9 @@ def evaluate_bertscore(generated: list[str], references: list[str]) -> dict:
         }
     except ImportError:
         print("  [Aviso] bert-score no instalado. Omitiendo BERTScore.")
+        return {}
+    except Exception as e:
+        print(f"  [Aviso] BERTScore falló ({e}). Omitiendo.")
         return {}
 
 
