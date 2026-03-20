@@ -1,0 +1,20 @@
+Primer paso: crear el entorno Python 3.12
+
+cd "/Users/albertog.garcia/Documents/MUIA 2/8_TFM/KGE_master_tesis"
+python3.12 -m venv venv312
+source venv312/bin/activate
+pip install -r requirements.txt
+
+Ejecución del pipeline
+
+# Paso a paso (recomendado la primera vez)
+python src/phase1_triples.py          # ~3 min
+python src/phase2_kge_train.py        # ~45-90 min en CPU
+python src/phase3_link_prediction.py
+python src/run_pipeline.py --phase 6  # evaluación completa
+
+# Pipeline completo de una vez
+python src/run_pipeline.py --phase all
+
+# Sesión interactiva con una incidencia específica
+python src/run_pipeline.py --phase 4 --interactive --incident incident_XYZ

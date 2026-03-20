@@ -69,7 +69,7 @@ Se está construyendo un sistema conversacional iterativo donde:
 
 ### En Progreso
 
-- [ ] Pipeline end-to-end: RDF → tripletas → KGE (TransE) → contexto para QA
+- [ ] Pipeline end-to-end: RDF → tripletas → KGE (TransE o DistMult) → contexto para QA
 - [ ] Verbalización de tripletas mediante plantillas o LLM ligero de Hugging Face
 - [ ] Generación de corpus sintético de evaluación (preguntas y respuestas) con modelo ligero de Hugging Face
   - Consultas directas (1-hop)
