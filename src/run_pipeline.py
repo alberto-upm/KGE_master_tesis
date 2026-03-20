@@ -50,7 +50,7 @@ def run_phase1():
     run()
 
 
-def run_phase2(epochs=None, dim=None, device="cpu"):
+def run_phase2(epochs=None, dim=None, device=cfg.DEVICE):
     from phase2_kge_train import run
     run(epochs=epochs, dim=dim, device=device)
 
@@ -60,7 +60,7 @@ def run_phase3(top_k=None):
     run(top_k=top_k or cfg.TOP_K_PREDICT)
 
 
-def run_phase4(model_name=None, device="cpu", interactive=False, incident_id=""):
+def run_phase4(model_name=None, device=cfg.DEVICE, interactive=False, incident_id=""):
     from phase4_llm_inference import run
     run(
         model_name=model_name or cfg.DEFAULT_MODEL,
@@ -76,7 +76,7 @@ def run_phase5():
     print("No tiene ejecución standalone. Ejecuta las fases 4 o 6 para activarla.")
 
 
-def run_phase6(n_samples=None, model_name=None, device="cpu"):
+def run_phase6(n_samples=None, model_name=None, device=cfg.DEVICE):
     from phase6_validation import run
     run(
         n_samples=n_samples or cfg.EVAL_SAMPLE_N,
