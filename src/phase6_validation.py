@@ -55,8 +55,14 @@ def exact_match(prediction: str, reference: str) -> bool:
 
 
 def token_f1(prediction: str, reference: str) -> float:
-    """F1 de solapamiento de tokens entre predicción y referencia."""
-    pred_tokens = set(prediction.lower().split())
+    """
+    F1 de solapamiento de tokens entre predicción y referencia.
+    Usa solo la primera línea de la predicción para no penalizar salidas largas
+    donde el identificador correcto aparece al principio.
+    """
+    # Tomar solo la primera línea significativa (el identificador extraído)
+    first_line = prediction.split("\n")[0].strip()
+    pred_tokens = set(first_line.lower().split())
     ref_tokens  = set(reference.lower().split())
     if not pred_tokens or not ref_tokens:
         return 0.0
@@ -156,8 +162,8 @@ def run_evaluation(
             except Exception:
                 pass
 
-        # Generar respuesta libre (sin opciones)
-        prediction = llm.answer(sentences, question)
+        # Generar respuesta libre (sin opciones); do_extract=True extrae el ID
+        prediction = llm.answer(sentences, question, do_extract=True)
 
         em    = exact_match(prediction, reference)
         tf1   = round(token_f1(prediction, reference), 4)

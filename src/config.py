@@ -67,7 +67,7 @@ VALID_RATIO    = 0.10
 # LLM
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL   = "google/flan-t5-base"   # alternativa: flan-t5-large
+DEFAULT_MODEL   = "mistralai/Mistral-7B-Instruct-v0.2"   # alternativa: flan-t5-large mistralai/Mistral-7B-Instruct-v0.2
 MAX_CTX_LEN     = 512                      # tokens máximos de entrada
 MAX_NEW_TOKENS  = 128
 

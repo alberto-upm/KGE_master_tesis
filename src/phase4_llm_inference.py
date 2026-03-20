@@ -33,19 +33,88 @@ from generate_corpus import PRED_TEMPLATES_ES
 
 SYSTEM_PROMPT = (
     "Eres un asistente experto en gestión de incidencias técnicas. "
-    "Responde únicamente con la información contenida en el contexto del grafo. "
-    "Si la respuesta no está en el contexto, responde: 'No tengo información suficiente'."
+    "Responde ÚNICAMENTE con el identificador exacto de la entidad (por ejemplo: "
+    "employee__986, supportGroup_149763..., incidentOrigin__2). "
+    "No escribas frases, ni explicaciones, ni el contexto. Solo el identificador."
+)
+
+# Plantilla para modelos decoder-only que usan chat template (Mistral, Llama, etc.)
+_CHAT_INSTRUCTION = (
+    "Dado el siguiente contexto del grafo de conocimiento, responde a la pregunta.\n"
+    "IMPORTANTE: Responde ÚNICAMENTE con el identificador exacto de la entidad "
+    "(sin frases, sin explicaciones, sin puntuación adicional).\n\n"
+    "Contexto:\n{context_block}\n\n"
+    "Pregunta: {question}\n"
+    "Identificador:"
+)
+
+# Plantilla para modelos seq2seq (T5, BART, etc.)
+_SEQ2SEQ_PROMPT = (
+    "{system}\n\n"
+    "Contexto del grafo:\n{context_block}\n\n"
+    "Pregunta: {question}\n"
+    "Respuesta:"
 )
 
 
-def build_prompt(context_sentences: list[str], question: str) -> str:
+def build_prompt(
+    context_sentences: list[str],
+    question: str,
+    is_seq2seq: bool = True,
+    tokenizer=None,
+) -> str:
+    """
+    Construye el prompt adaptado al tipo de modelo:
+    - seq2seq (T5/BART): texto plano con sección "Respuesta:"
+    - decoder-only (Mistral/Llama): chat template con [INST]...[/INST] si el
+      tokenizador lo soporta, o instrucción directa si no.
+    """
     context_block = "\n".join(f"- {s}" for s in context_sentences)
-    return (
-        f"{SYSTEM_PROMPT}\n\n"
-        f"Contexto del grafo de conocimiento:\n{context_block}\n\n"
-        f"Pregunta: {question}\n"
-        f"Respuesta:"
+
+    if is_seq2seq:
+        return _SEQ2SEQ_PROMPT.format(
+            system=SYSTEM_PROMPT,
+            context_block=context_block,
+            question=question,
+        )
+
+    # Decoder-only: usar apply_chat_template si el tokenizer lo soporta
+    user_msg = _CHAT_INSTRUCTION.format(
+        context_block=context_block,
+        question=question,
     )
+    if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
+        try:
+            return tokenizer.apply_chat_template(
+                [{"role": "user", "content": user_msg}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        except Exception:
+            pass
+    # Fallback: Mistral manual
+    return f"<s>[INST] {user_msg} [/INST]"
+
+
+def extract_answer(raw: str) -> str:
+    """
+    Extrae el identificador de entidad de la salida cruda del LLM.
+    Estrategia:
+      1. Busca texto tras "Identificador:" o "Respuesta:" y toma la 1ª línea.
+      2. Si no, toma la 1ª línea no vacía que no empiece por '-' ni '['.
+      3. Fallback: devuelve el texto tal cual (sin el contexto repetido).
+    """
+    # Eliminar posibles ecos del prompt (Mistral a veces repite el [INST])
+    for marker in ("Identificador:", "Respuesta:", "[/INST]"):
+        if marker in raw:
+            raw = raw.split(marker)[-1]
+
+    for line in raw.split("\n"):
+        line = line.strip(" .-·\t")
+        if line and not line.startswith("[") and not line.startswith("Contexto"):
+            return line
+
+    return raw.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -171,13 +240,21 @@ class KGEAugmentedLLM:
         context_sentences: list[str],
         question: str,
         max_new_tokens: int = cfg.MAX_NEW_TOKENS,
+        do_extract: bool = True,
     ) -> str:
         """
         Genera una respuesta dado el contexto verbalizado y la pregunta.
+        Para modelos decoder-only (Mistral, Llama) usa el chat template y
+        extrae solo el identificador de entidad de la salida cruda.
         """
         import torch
 
-        prompt = build_prompt(context_sentences, question)
+        prompt = build_prompt(
+            context_sentences,
+            question,
+            is_seq2seq=self.is_seq2seq,
+            tokenizer=self.tokenizer,
+        )
         inputs = self.tokenizer(
             prompt,
             return_tensors="pt",
@@ -186,20 +263,32 @@ class KGEAugmentedLLM:
             padding=True,
         ).to(self.device)
 
+        # Para respuestas de tipo identificador, 64 tokens son más que suficientes.
+        # Usar greedy (num_beams=1) en decoder-only para evitar bucles de repetición.
+        gen_kwargs: dict = {
+            "max_new_tokens": min(max_new_tokens, 64) if not self.is_seq2seq else max_new_tokens,
+            "num_beams":      4 if self.is_seq2seq else 1,
+            "early_stopping": True if self.is_seq2seq else False,
+            "do_sample":      False,
+        }
+        if not self.is_seq2seq:
+            gen_kwargs["temperature"] = 1.0
+            gen_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
+
         with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                num_beams=4,
-                early_stopping=True,
-            )
+            outputs = self.model.generate(**inputs, **gen_kwargs)
 
         # Para decoder-only: eliminar los tokens del prompt de la salida
         if not self.is_seq2seq:
             input_len = inputs["input_ids"].shape[1]
             outputs   = outputs[:, input_len:]
 
-        return self.tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+        raw = self.tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+
+        # Extraer solo el identificador de entidad
+        if do_extract:
+            return extract_answer(raw)
+        return raw
 
     # ------------------------------------------------------------------
     # Sesión interactiva (Fase 4 + Fase 5 combinadas)
