@@ -35,10 +35,62 @@ Dependencias entre fases:
 import argparse
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
+
+
+# ---------------------------------------------------------------------------
+# Tee: duplica stdout+stderr al fichero de log
+# ---------------------------------------------------------------------------
+
+class _Tee:
+    """Escribe simultáneamente en el stream original y en un fichero."""
+
+    def __init__(self, stream, log_path: Path):
+        self._stream   = stream
+        self._log_path = log_path
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._file = open(log_path, "w", encoding="utf-8", buffering=1)
+
+    def write(self, data):
+        self._stream.write(data)
+        self._file.write(data)
+
+    def flush(self):
+        self._stream.flush()
+        self._file.flush()
+
+    def fileno(self):
+        return self._stream.fileno()
+
+    def close(self):
+        self._file.close()
+
+    # Delegar cualquier otro atributo al stream original
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def _start_logging(phase: str) -> "_Tee | None":
+    """Redirige stdout y stderr a out/logs/pipeline_<fecha>_phase<N>.log."""
+    ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = cfg.OUT_DIR / "logs" / f"pipeline_{ts}_phase{phase}.log"
+    tee      = _Tee(sys.__stdout__, log_file)
+    sys.stdout = tee
+    sys.stderr = tee
+    print(f"[Log] Guardando traza en: {log_file}")
+    return tee
+
+
+def _stop_logging(tee: "_Tee | None"):
+    if tee is None:
+        return
+    sys.stdout = sys.__stdout__
+    sys.stderr = sys.__stderr__
+    tee.close()
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +180,7 @@ def main():
     args = parser.parse_args()
     phase = args.phase
 
+    tee = _start_logging(phase)
     start_total = time.time()
     print(f"\n{'='*60}")
     print(f"  Pipeline KGE + LLM  —  Fase(s): {phase.upper()}")
@@ -168,6 +221,7 @@ def main():
     print(f"\n{'='*60}")
     print(f"  Pipeline finalizado en {total:.1f}s")
     print(f"{'='*60}\n")
+    _stop_logging(tee)
 
 
 if __name__ == "__main__":
