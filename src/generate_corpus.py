@@ -14,9 +14,13 @@ import json
 import random
 import csv
 import re
+import sys
 from pathlib import Path
 from collections import defaultdict
 from typing import Optional
+
+sys.path.insert(0, str(Path(__file__).parent))
+import config as cfg
 
 from rdflib import Graph, Namespace, RDF, URIRef
 
@@ -486,40 +490,52 @@ def generate_chains(incidents: dict, pools: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# (OPCIONAL) 4. PARAFRASEO CON MODELO HUGGING FACE
+# (OPCIONAL) 4. PARAFRASEO VÍA SERVIDOR vLLM
 # ---------------------------------------------------------------------------
 
+_vllm_paraphraser_client = None
+
+
 def _load_paraphraser():
-    """Carga flan-t5-small una sola vez y lo devuelve como (tokenizer, model) o None si falla."""
+    """
+    Devuelve un cliente OpenAI apuntando al servidor vLLM local.
+    Requiere que vLLM esté corriendo (ver config.VLLM_BASE_URL).
+    """
+    global _vllm_paraphraser_client
+    if _vllm_paraphraser_client is not None:
+        return _vllm_paraphraser_client
     try:
-        from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-        model_name = "google/flan-t5-small"
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        model.eval()
-        return (tokenizer, model)
+        from openai import OpenAI
+        _vllm_paraphraser_client = OpenAI(
+            base_url=cfg.VLLM_BASE_URL, api_key="EMPTY"
+        )
+        return _vllm_paraphraser_client
     except Exception as e:
-        print(f"[HF] No se pudo cargar el modelo: {e}")
+        print(f"[vLLM] No se pudo crear el cliente: {e}")
         return None
 
 
-def _paraphrase_question(paraphraser, question_text: str) -> Optional[str]:
+def _paraphrase_question(client, question_text: str) -> Optional[str]:
     """
-    Pide al modelo que reformule el enunciado manteniendo los nombres de entidad.
+    Pide al servidor vLLM que reformule el enunciado en español
+    manteniendo los identificadores de entidad intactos.
     Devuelve el texto reformulado o None si falla / no cambia nada.
     """
-    tokenizer, model = paraphraser
     prompt = (
-        "Paraphrase the following question in Spanish "
-        "keeping entity names unchanged: "
-        + question_text
+        "Reformula la siguiente pregunta en español de forma diferente, "
+        "manteniendo EXACTAMENTE los mismos identificadores de entidad "
+        "(no los traduzcas ni los modifiques). "
+        "Responde SOLO con la pregunta reformulada, sin explicaciones.\n\n"
+        f"Pregunta: {question_text}"
     )
     try:
-        import torch
-        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=256)
-        with torch.no_grad():
-            outputs = model.generate(**inputs, max_new_tokens=80)
-        result = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+        resp = client.chat.completions.create(
+            model=cfg.DEFAULT_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=120,
+            temperature=0.7,
+        )
+        result = resp.choices[0].message.content.strip()
         return result if result and result != question_text else None
     except Exception:
         return None

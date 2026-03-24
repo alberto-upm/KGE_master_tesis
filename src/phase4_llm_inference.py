@@ -4,17 +4,21 @@ Fase 4 — Inferencia con LLM aumentado con contexto KGE.
 Estrategia de inyección: Graph RAG
   1. Extraer subgrafo de la incidencia (fase 5)
   2. Verbalizar tripletas a frases en español
-  3. Anteponer el contexto verbalizado al prompt del LLM
+  3. Enviar el contexto verbalizado + pregunta al servidor vLLM
   4. El LLM genera la respuesta; el usuario confirma o corrige
 
-Modelos soportados:
-  - google/flan-t5-base   (CPU, ~250 MB, por defecto)
-  - google/flan-t5-large  (CPU, ~800 MB, mejor calidad)
-  - mistralai/Mistral-7B-Instruct-v0.2  (GPU + cuantización 4-bit)
+El LLM se sirve externamente con vLLM (API OpenAI-compatible).
+Arrancar antes de ejecutar este módulo:
+
+  vllm serve meta-llama/Meta-Llama-3-8B-Instruct \\
+      --port 8000 --dtype float16 --max-model-len 4096 \\
+      --tool-call-parser llama3_json
 
 Uso:
-  python src/phase4_llm_inference.py --model google/flan-t5-base
+  python src/phase4_llm_inference.py
   python src/phase4_llm_inference.py --interactive --incident incident_XXXXX
+  python src/phase4_llm_inference.py --base-url http://localhost:8000/v1 \\
+      --model meta-llama/Meta-Llama-3-8B-Instruct
 """
 
 import argparse
@@ -38,8 +42,7 @@ SYSTEM_PROMPT = (
     "No escribas frases, ni explicaciones, ni el contexto. Solo el identificador."
 )
 
-# Plantilla para modelos decoder-only que usan chat template (Mistral, Llama, etc.)
-_CHAT_INSTRUCTION = (
+_USER_TEMPLATE = (
     "Dado el siguiente contexto del grafo de conocimiento, responde a la pregunta.\n"
     "IMPORTANTE: Responde ÚNICAMENTE con el identificador exacto de la entidad "
     "(sin frases, sin explicaciones, sin puntuación adicional).\n\n"
@@ -48,52 +51,17 @@ _CHAT_INSTRUCTION = (
     "Identificador:"
 )
 
-# Plantilla para modelos seq2seq (T5, BART, etc.)
-_SEQ2SEQ_PROMPT = (
-    "{system}\n\n"
-    "Contexto del grafo:\n{context_block}\n\n"
-    "Pregunta: {question}\n"
-    "Respuesta:"
-)
 
-
-def build_prompt(
-    context_sentences: list[str],
-    question: str,
-    is_seq2seq: bool = True,
-    tokenizer=None,
-) -> str:
-    """
-    Construye el prompt adaptado al tipo de modelo:
-    - seq2seq (T5/BART): texto plano con sección "Respuesta:"
-    - decoder-only (Mistral/Llama): chat template con [INST]...[/INST] si el
-      tokenizador lo soporta, o instrucción directa si no.
-    """
+def _build_messages(context_sentences: list[str], question: str) -> list[dict]:
+    """Construye la lista de mensajes para la API de chat."""
     context_block = "\n".join(f"- {s}" for s in context_sentences)
-
-    if is_seq2seq:
-        return _SEQ2SEQ_PROMPT.format(
-            system=SYSTEM_PROMPT,
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user",   "content": _USER_TEMPLATE.format(
             context_block=context_block,
             question=question,
-        )
-
-    # Decoder-only: usar apply_chat_template si el tokenizer lo soporta
-    user_msg = _CHAT_INSTRUCTION.format(
-        context_block=context_block,
-        question=question,
-    )
-    if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
-        try:
-            return tokenizer.apply_chat_template(
-                [{"role": "user", "content": user_msg}],
-                tokenize=False,
-                add_generation_prompt=True,
-            )
-        except Exception:
-            pass
-    # Fallback: Mistral manual
-    return f"<s>[INST] {user_msg} [/INST]"
+        )},
+    ]
 
 
 def extract_answer(raw: str) -> str:
@@ -185,55 +153,30 @@ def get_verbalized_sentences(incident_id: str) -> list[str]:
 
 class KGEAugmentedLLM:
     """
-    LLM de HuggingFace aumentado con contexto de grafo de conocimiento.
+    LLM aumentado con contexto KGE que delega la inferencia en un servidor
+    vLLM (API OpenAI-compatible).  No carga ningún peso en memoria.
 
-    Soporta arquitecturas seq2seq (T5) y decoder-only (Mistral/Llama)
-    de forma transparente.
+    Requiere que vLLM esté corriendo antes de instanciar esta clase:
+      vllm serve meta-llama/Meta-Llama-3-8B-Instruct \\
+          --port 8000 --dtype float16 --max-model-len 4096 \\
+          --tool-call-parser llama3_json
     """
 
     def __init__(
         self,
         model_name: str = cfg.DEFAULT_MODEL,
-        device: str = "cpu",
+        base_url:   str = cfg.VLLM_BASE_URL,
+        # Los siguientes parámetros se aceptan por compatibilidad con llamadas
+        # anteriores pero se ignoran (el servidor vLLM gestiona el dispositivo).
+        device:       str  = "cpu",
         load_in_4bit: bool = False,
     ):
-        import torch
-        from transformers import AutoTokenizer
+        from openai import OpenAI
 
-        print(f"[Phase4] Cargando modelo: {model_name} ...")
-        self.model_name  = model_name
-        self.device      = device
-        self.is_seq2seq  = self._is_seq2seq(model_name)
-
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-
-        model_kwargs: dict = {}
-        if load_in_4bit:
-            model_kwargs["load_in_4bit"] = True
-            model_kwargs["device_map"]   = "auto"
-
-        if self.is_seq2seq:
-            from transformers import AutoModelForSeq2SeqLM
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                model_name, **model_kwargs
-            )
-        else:
-            from transformers import AutoModelForCausalLM
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_name, **model_kwargs
-            )
-
-        if not load_in_4bit:
-            self.model = self.model.to(device)
-        self.model.eval()
-        print(f"[Phase4] Modelo listo (seq2seq={self.is_seq2seq}).")
-
-    @staticmethod
-    def _is_seq2seq(model_name: str) -> bool:
-        name_lower = model_name.lower()
-        return any(k in name_lower for k in ["t5", "bart", "mbart", "pegasus"])
+        self.model_name = model_name
+        self.base_url   = base_url
+        self._client    = OpenAI(base_url=base_url, api_key="EMPTY")
+        print(f"[Phase4] Cliente vLLM → {base_url}  modelo={model_name}")
 
     def answer(
         self,
@@ -243,49 +186,17 @@ class KGEAugmentedLLM:
         do_extract: bool = True,
     ) -> str:
         """
-        Genera una respuesta dado el contexto verbalizado y la pregunta.
-        Para modelos decoder-only (Mistral, Llama) usa el chat template y
-        extrae solo el identificador de entidad de la salida cruda.
+        Envía el contexto + pregunta al servidor vLLM y devuelve
+        el identificador de entidad extraído de la respuesta.
         """
-        import torch
-
-        prompt = build_prompt(
-            context_sentences,
-            question,
-            is_seq2seq=self.is_seq2seq,
-            tokenizer=self.tokenizer,
+        messages = _build_messages(context_sentences, question)
+        resp = self._client.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            max_tokens=max_new_tokens,
+            temperature=0.0,
         )
-        inputs = self.tokenizer(
-            prompt,
-            return_tensors="pt",
-            truncation=True,
-            max_length=cfg.MAX_CTX_LEN,
-            padding=True,
-        ).to(self.device)
-
-        # Para respuestas de tipo identificador, 64 tokens son más que suficientes.
-        # Usar greedy (num_beams=1) en decoder-only para evitar bucles de repetición.
-        gen_kwargs: dict = {
-            "max_new_tokens": min(max_new_tokens, 64) if not self.is_seq2seq else max_new_tokens,
-            "num_beams":      4 if self.is_seq2seq else 1,
-            "early_stopping": True if self.is_seq2seq else False,
-            "do_sample":      False,
-        }
-        if not self.is_seq2seq:
-            gen_kwargs["temperature"] = 1.0
-            gen_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
-
-        with torch.no_grad():
-            outputs = self.model.generate(**inputs, **gen_kwargs)
-
-        # Para decoder-only: eliminar los tokens del prompt de la salida
-        if not self.is_seq2seq:
-            input_len = inputs["input_ids"].shape[1]
-            outputs   = outputs[:, input_len:]
-
-        raw = self.tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
-
-        # Extraer solo el identificador de entidad
+        raw = resp.choices[0].message.content.strip()
         if do_extract:
             return extract_answer(raw)
         return raw
@@ -374,16 +285,18 @@ class KGEAugmentedLLM:
 # ---------------------------------------------------------------------------
 
 def run(
-    model_name: str    = cfg.DEFAULT_MODEL,
-    device: str        = "cpu",
-    interactive: bool  = False,
-    incident_id: str   = "",
+    model_name:  str  = cfg.DEFAULT_MODEL,
+    base_url:    str  = cfg.VLLM_BASE_URL,
+    interactive: bool = False,
+    incident_id: str  = "",
+    # device se acepta por compatibilidad con run_pipeline.py pero se ignora
+    device:      str  = "cpu",
 ) -> None:
     print("=" * 60)
     print("FASE 4 — Inferencia LLM con contexto KGE")
     print("=" * 60)
 
-    llm = KGEAugmentedLLM(model_name=model_name, device=device)
+    llm = KGEAugmentedLLM(model_name=model_name, base_url=base_url)
 
     if interactive:
         # Cargar mapa de incidencias para obtener las propiedades
@@ -429,15 +342,15 @@ def run(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="LLM con contexto KGE")
+    parser = argparse.ArgumentParser(description="LLM con contexto KGE (vLLM)")
     parser.add_argument("--model",       default=cfg.DEFAULT_MODEL)
-    parser.add_argument("--device",      default=cfg.DEVICE)
+    parser.add_argument("--base-url",    default=cfg.VLLM_BASE_URL)
     parser.add_argument("--interactive", action="store_true")
     parser.add_argument("--incident",    default="", help="ID de incidencia para sesión interactiva")
     args = parser.parse_args()
     run(
         model_name=args.model,
-        device=args.device,
+        base_url=args.base_url,
         interactive=args.interactive,
         incident_id=args.incident,
     )

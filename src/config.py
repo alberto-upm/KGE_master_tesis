@@ -64,11 +64,16 @@ VALID_RATIO    = 0.10
 # TEST_RATIO = 0.10 (implícito)
 
 # ---------------------------------------------------------------------------
-# LLM
+# LLM — vLLM (servidor local OpenAI-compatible)
+#
+# Arrancar con:
+#   vllm serve meta-llama/Meta-Llama-3-8B-Instruct \
+#       --port 8000 --dtype float16 --max-model-len 4096 \
+#       --tool-call-parser llama3_json
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL   = "mistralai/Mistral-7B-Instruct-v0.2"   # alternativa: flan-t5-large mistralai/Mistral-7B-Instruct-v0.2
-MAX_CTX_LEN     = 512                      # tokens máximos de entrada
+VLLM_BASE_URL   = "http://localhost:8000/v1"
+DEFAULT_MODEL   = "meta-llama/Meta-Llama-3-8B-Instruct"
 MAX_NEW_TOKENS  = 128
 
 # ---------------------------------------------------------------------------
