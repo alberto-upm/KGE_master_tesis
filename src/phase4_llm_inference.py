@@ -251,6 +251,10 @@ class KGEAugmentedLLM:
             if not question or question.lower() == "salir":
                 break
 
+            print("\n[DEBUG] Contexto enviado al LLM:")
+            for _s in sentences:
+                print(f"  {_s}")
+            print()
             answer = self.answer(sentences, question)
             print(f"Respuesta: {answer}")
 
