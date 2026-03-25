@@ -176,6 +176,19 @@ python src/run_pipeline.py --phase 4 --interactive
 python src/run_pipeline.py --phase 4 --interactive --incident incident_1497610128711762304007
 ```
 
+Dentro de la sesión interactiva puedes cambiar de incidencia sin salir escribiendo `incidencia <id>`:
+
+```
+Pregunta: dime el cliente de esta incidencia
+Respuesta: company__LABM4K681
+
+Pregunta: incidencia incident_XXXXX
+[Cambia el contexto automáticamente y muestra el nuevo]
+
+Pregunta: ¿qué técnico tiene asignado?
+Respuesta: employee__259
+```
+
 ---
 
 ### Paso 6 — Validación completa
