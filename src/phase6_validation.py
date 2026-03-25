@@ -135,17 +135,17 @@ def run_1hop_evaluation(
     n_samples: int = cfg.EVAL_SAMPLE_N,
     seed: int      = cfg.RANDOM_SEED,
 ) -> tuple[dict, list[dict]]:
-    """Evalúa preguntas 1-hop (excluye hf_paraphrase)."""
+    """Evalúa preguntas 1-hop (excluye paraphrase)."""
     with open(cfg.QA_CORPUS, "r", encoding="utf-8") as f:
         corpus = json.load(f)
 
     pool = [
         item for item in corpus.get("1hop", [])
-        if "hf_paraphrase" not in item.get("type", "")
+        if "paraphrase" not in item.get("type", "")
     ]
     rng     = random.Random(seed)
     samples = rng.sample(pool, min(n_samples, len(pool)))
-    print(f"  {len(samples)} preguntas 1-hop seleccionadas (sin hf_paraphrase, pool={len(pool)}).")
+    print(f"  {len(samples)} preguntas 1-hop seleccionadas (sin paraphrase, pool={len(pool)}).")
 
     log, generated, references = [], [], []
 

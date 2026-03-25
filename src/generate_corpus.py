@@ -546,7 +546,7 @@ def paraphrase_1hop_with_hf(qa_list: list[dict], n_to_paraphrase: int = 0) -> li
     Parafrasea n_to_paraphrase pares 1-hop con flan-t5-small.
     Cada entrada nueva hereda las opciones/respuesta originales;
     solo cambia el enunciado de la pregunta y el tipo queda marcado
-    con el sufijo '_hf_paraphrase'.
+    con el sufijo '_paraphrase'.
 
     Activa con n_to_paraphrase > 0 (requiere RAM/GPU suficiente).
     """
@@ -565,7 +565,7 @@ def paraphrase_1hop_with_hf(qa_list: list[dict], n_to_paraphrase: int = 0) -> li
             new_item = dict(item)
             opts_str = item["question"].split("\n", 1)[1] if "\n" in item["question"] else ""
             new_item["question"] = paraphrased + ("\n" + opts_str if opts_str else "")
-            new_item["type"] = item["type"] + "_hf_paraphrase"
+            new_item["type"] = item["type"] + "_paraphrase"
             new_entries.append(new_item)
 
     print(f"[HF-1hop] {len(new_entries)} preguntas añadidas.")
@@ -581,7 +581,7 @@ def paraphrase_chains_with_hf(chains: list[dict], n_to_paraphrase: int = 0) -> l
     "Sabiendo que el tipo es typeIncident__1, ...").
     Las opciones y respuestas de cada paso no cambian.
     Las cadenas nuevas reciben un chain_id nuevo y el tipo queda marcado
-    con el sufijo '_hf_paraphrase'.
+    con el sufijo '_paraphrase'.
 
     Activa con n_to_paraphrase > 0 (requiere RAM/GPU suficiente).
     """
@@ -612,7 +612,7 @@ def paraphrase_chains_with_hf(chains: list[dict], n_to_paraphrase: int = 0) -> l
             "chain_id":   next_id,
             "context_inc": chain["context_inc"],
             "n_hops":     chain["n_hops"],
-            "chain_type": chain["chain_type"] + "_hf_paraphrase",
+            "chain_type": chain["chain_type"] + "_paraphrase",
             "steps":      new_steps,
         })
         next_id += 1
