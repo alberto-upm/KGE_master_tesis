@@ -2,99 +2,47 @@
 
 ## Descripción
 
-Este proyecto investiga y desarrolla un sistema que combina **Knowledge Graph Embeddings (KGE)** con **modelos de lenguaje grandes (LLMs)** para reducir las alucinaciones mediante la inyección de conocimiento estructurado. El enfoque consiste en transformar un grafo RDF en representaciones entrenables que sirven como fuente de contexto verificable para guiar las respuestas del modelo de lenguaje.
+Este proyecto implementa un sistema end-to-end que combina **Knowledge Graph Embeddings (KGE)** con **modelos de lenguaje grandes (LLMs)** para reducir alucinaciones mediante inyección de conocimiento estructurado. El sistema transforma un grafo RDF de gestión de incidencias en representaciones entrenables que sirven como contexto verificable para guiar las respuestas del LLM.
 
 ---
 
-## Motivación
-
-Los LLMs son propensos a generar información incorrecta o inventada (alucinaciones), especialmente en dominios donde la precisión factual es crítica. Los grafos de conocimiento, al ser fuentes de información estructurada y verificable, representan un complemento natural para anclar las respuestas del modelo a hechos concretos.
-
-Este trabajo explora cómo integrar ambas tecnologías de forma eficiente en un flujo end-to-end.
-
----
-
-## Literatura de Referencia
-
-Los siguientes trabajos constituyen la base teórica del proyecto:
-
-| Paper | Autores |
-|-------|---------|
-| *Let Your Graph Do the Talking: Encoding Structured Data for LLMs* | Bryan Perozzi, Bahare Fatemi, Dustin Zelle, Anton Tsitsulin, Mehran Kazemi, Rami Al-Rfou, Jonathan Halcrow |
-| *Injecting Knowledge Graphs into Large Language Models* | Erica Coppolillo |
-| *Talk Like a Graph: Encoding Graphs for Large Language Models* | Bahare Fatemi, Jonathan Halcrow, Bryan Perozzi |
-| *Can Knowledge Graphs Reduce Hallucinations in LLMs? A Survey* | Garima Agrawal, Tharindu Kumarage, Zeyad Alghamdi, Huan Liu |
-| *Neurosymbolic AI for Enhancing Instructability in Generative AI* | Amit Sheth, Vishal Pallagani, Kaushik Roy |
-
----
-
-## Arquitectura del Sistema
-
-### Prueba de Concepto (PoC) End-to-End
-
-El pipeline actual implementa los siguientes pasos:
+## Arquitectura del Pipeline
 
 ```
-Grafo RDF
-    │
-    ▼
-Extracción de tripletas (sujeto, predicado, objeto)
-    │
-    ▼
-Entrenamiento del modelo KGE (TransE)
-    │
-    ▼
-Recuperación de contexto relevante desde el grafo
-    │
-    ▼
-Evaluación del LLM en tareas de preguntas y respuestas
+data/filtrado.ttl  (grafo RDF con ~60K incidencias)
+        │
+        ▼
+  Fase 1 — Parseo RDF → tripletas TSV (train/valid/test)
+        │
+        ▼
+  Fase 2 — Entrenamiento KGE DistMult (PyKEEN, GPU A100)
+        │
+        ▼
+  Fase 3 — Link prediction: inferencia de relaciones latentes
+        │
+        ▼
+  Fase 4 — Inferencia LLM aumentada con contexto KGE (vLLM)
+        │
+        ▼
+  Fase 5 — Subgrafo de configuración por sesión (CBR)
+        │
+        ▼
+  Fase 6 — Validación: EM, Token F1, BERTScore, Hit@k
 ```
 
-### Flujo Iterativo (en desarrollo)
-
-Se está construyendo un sistema conversacional iterativo donde:
-
-1. El grafo actúa como base de conocimiento estructurado.
-2. El sistema propone hipótesis relevantes a partir de la información existente.
-3. El usuario confirma o refuta la información mediante preguntas sucesivas.
-4. El conocimiento confirmado se incorpora dinámicamente al contexto.
+**Dominio**: Sistema de gestión de incidencias técnicas en español.
+**Entidades**: incidencias, técnicos (internos/externos), clientes, grupos/equipos/categorías de soporte, estados, tipos, orígenes.
 
 ---
 
-## Estado del Proyecto
+## Requisitos
 
-### Completado
+```bash
+pip install -r requirements.txt
+pip install openai bert-score
+```
 
-- [x] Revisión del estado del arte en KGE e inyección de conocimiento en LLMs
-
-### En Progreso
-
-- [ ] Pipeline end-to-end: RDF → tripletas → KGE (TransE o DistMult) → contexto para QA
-- [ ] Verbalización de tripletas mediante plantillas o LLM ligero de Hugging Face
-- [ ] Generación de corpus sintético de evaluación (preguntas y respuestas) con modelo ligero de Hugging Face
-  - Consultas directas (1-hop)
-  - Consultas multi-hop
-- [ ] Validación de que el sistema recupera información del grafo sin introducir alucinaciones
-- [ ] Desarrollo del flujo iterativo de hipótesis y confirmación
-
----
-
-## Metodología de Evaluación
-
-El sistema se evalúa sobre un corpus sintético generado con un modelo ligero de Hugging Face, diseñado para comprobar:
-
-- **Recuperación 1-hop**: El modelo responde correctamente a preguntas que requieren una única relación del grafo.
-- **Recuperación multi-hop**: El modelo encadena correctamente varias relaciones para responder preguntas complejas.
-- **Ausencia de alucinaciones**: Las respuestas generadas no introducen información que no esté presente en el grafo.
-
----
-
-## Tecnologías
-
-- **Representación del conocimiento**: RDF, tripletas (sujeto, predicado, objeto)
-- **Modelo KGE**: TransE
-- **Modelos de lenguaje**: LLMs de Hugging Face (modelo ligero para generación del corpus)
-- **Paradigma**: Neurosimbólico — combinación de razonamiento simbólico (grafo) con aprendizaje profundo (LLM)
+**GPU**: NVIDIA A100-40GB (o similar). El entrenamiento KGE usa CUDA automáticamente si está disponible.
 
 ---
 
@@ -102,28 +50,207 @@ El sistema se evalúa sobre un corpus sintético generado con un modelo ligero d
 
 ```
 ├── data/
-│   ├── raw/             # Grafo RDF original
-│   ├── triples/         # Tripletas extraídas para entrenamiento KGE
-│   └── corpus/          # Corpus sintético de evaluación (QA)
-├── models/
-│   ├── kge/             # Modelo TransE entrenado
-│   └── verbalization/   # Plantillas de verbalización de tripletas
+│   ├── filtrado.ttl              # Grafo RDF fuente (~30 MB, 573K líneas)
+│   ├── triples/                  # TSV generados por fase 1
+│   │   ├── train.tsv             # 80% del grafo
+│   │   ├── valid.tsv             # 10%
+│   │   └── test.tsv              # 10%
+│   └── corpus/                   # Corpus sintético de evaluación
+│       ├── qa_corpus.json        # Preguntas 1-hop + cadenas multi-hop
+│       ├── qa_1hop.csv           # Preguntas 1-hop (CSV)
+│       ├── qa_chains_flat.csv    # Cadenas multi-hop (CSV)
+│       └── triples_verbalized.json  # Tripletas verbalizadas en español
 ├── src/
-│   ├── extraction/      # Extracción de tripletas desde RDF
-│   ├── training/        # Entrenamiento del modelo KGE
-│   ├── retrieval/       # Recuperación de contexto desde el grafo
-│   ├── qa/              # Pipeline de preguntas y respuestas
-│   └── evaluation/      # Scripts de evaluación
-├── notebooks/           # Experimentos y análisis exploratorio
-└── README.md
+│   ├── config.py                 # Parámetros globales y rutas
+│   ├── generate_corpus.py        # Generación del corpus de evaluación
+│   ├── phase1_triples.py         # Parseo RDF → TSV
+│   ├── phase2_kge_train.py       # Entrenamiento DistMult (PyKEEN)
+│   ├── phase3_link_prediction.py # Link prediction (relaciones latentes)
+│   ├── phase4_llm_inference.py   # Inferencia LLM vía vLLM
+│   ├── phase5_config_subgraph.py # Subgrafo de sesión (CBR)
+│   ├── phase6_validation.py      # Evaluación completa
+│   └── run_pipeline.py           # Orquestador del pipeline
+├── out/
+│   ├── models/distmult/          # Modelo KGE entrenado (PyKEEN)
+│   ├── embeddings/               # Embeddings exportados (.pt + .json)
+│   ├── predictions/              # Relaciones latentes inferidas
+│   ├── evaluation/               # Métricas y detalle por muestra
+│   └── logs/                     # Trazas de ejecución con timestamp
+└── requirements.txt
 ```
 
 ---
 
-## Referencias
+## Ejecución paso a paso
 
-- Perozzi et al. (2024). *Let Your Graph Do the Talking*.
-- Coppolillo, E. (2024). *Injecting Knowledge Graphs into Large Language Models*.
-- Fatemi et al. (2024). *Talk Like a Graph*.
-- Agrawal et al. (2024). *Can Knowledge Graphs Reduce Hallucinations in LLMs? A Survey*.
-- Sheth et al. (2023). *Neurosymbolic AI for Enhancing Instructability in Generative AI*.
+### Paso 0 — Generar el corpus de evaluación (solo si no existe)
+
+```bash
+python src/generate_corpus.py
+```
+
+Genera `data/corpus/qa_corpus.json` con ~3.700 preguntas 1-hop y ~490 cadenas multi-hop en español.
+
+---
+
+### Paso 1 — Parsear el grafo RDF a tripletas TSV
+
+```bash
+python src/run_pipeline.py --phase 1
+```
+
+**Entrada**: `data/filtrado.ttl`
+**Salida**:
+- `data/triples/train.tsv` (80%)
+- `data/triples/valid.tsv` (10%)
+- `data/triples/test.tsv` (10%)
+- `out/embeddings/entity_to_id.json`
+- `out/embeddings/relation_to_id.json`
+
+---
+
+### Paso 2 — Entrenar el modelo KGE (DistMult)
+
+```bash
+python src/run_pipeline.py --phase 2
+```
+
+Usa CUDA automáticamente si está disponible. Parámetros en `src/config.py`:
+- `EMBEDDING_DIM = 256`
+- `N_EPOCHS = 200`
+- `BATCH_SIZE = 2048`
+- `NEG_PER_POS = 50`
+
+**Salida**:
+- `out/models/distmult/` (modelo completo PyKEEN)
+- `out/embeddings/entity_embeddings.pt`
+- `out/embeddings/relation_embeddings.pt`
+
+Para ajustar hiperparámetros:
+```bash
+python src/run_pipeline.py --phase 2 --epochs 300 --dim 128
+```
+
+---
+
+### Paso 3 — Inferencia de relaciones latentes (link prediction)
+
+```bash
+python src/run_pipeline.py --phase 3
+```
+
+**Salida**: `out/predictions/implicit_relations.json`
+
+Top-K predicciones implícitas por entidad (defecto: top-10).
+
+---
+
+### Paso 4 — Arrancar el servidor LLM (vLLM)
+
+El LLM se sirve localmente con vLLM, exponiendo una API compatible con OpenAI.
+**Ejecutar en una terminal separada antes de las fases 4 y 6:**
+
+```bash
+vllm serve meta-llama/Meta-Llama-3-8B-Instruct \
+    --port 8000 \
+    --dtype float16 \
+    --max-model-len 4096 \
+    --tool-call-parser llama3_json
+```
+
+El cliente en `phase4_llm_inference.py` conecta a `http://localhost:8000/v1` (configurable en `config.py` → `VLLM_BASE_URL`).
+
+---
+
+### Paso 4 — Demo de inferencia LLM
+
+```bash
+python src/run_pipeline.py --phase 4
+```
+
+Ejemplo rápido: toma la primera entrada del corpus, construye el contexto del subgrafo y lanza la pregunta al LLM.
+
+**Sesión interactiva** con una incidencia concreta:
+```bash
+python src/run_pipeline.py --phase 4 --interactive
+python src/run_pipeline.py --phase 4 --interactive --incident incident_1497610128711762304007
+```
+
+---
+
+### Paso 6 — Validación completa
+
+```bash
+python src/run_pipeline.py --phase 6
+```
+
+Evalúa 200 preguntas 1-hop + 200 cadenas multi-hop del corpus (sin opciones múltiples).
+El LLM responde en texto libre y se compara con el `answer` del corpus.
+
+**Métricas calculadas:**
+- **Exact Match (EM)**: la respuesta contiene exactamente el identificador esperado
+- **Token F1**: solapamiento de tokens (primera línea de la predicción)
+- **BERTScore F1**: similitud semántica (`xlm-roberta-base`)
+- **Chain Accuracy**: fracción de cadenas con todos los pasos correctos
+- **Hit@k**: métricas de ranking del KGE sobre el test set (PyKEEN)
+
+**Salida**:
+- `out/evaluation/results.json` — métricas globales + desglose por tipo
+- `out/evaluation/predictions.jsonl` — detalle de cada predicción
+- `out/logs/pipeline_<fecha>_phase6.log` — traza completa de ejecución
+
+Para evaluar menos muestras:
+```bash
+python src/run_pipeline.py --phase 6 --n-samples 100 --n-chains 50
+```
+
+---
+
+### Pipeline completo (fases 1 → 2 → 3 → 4 → 6)
+
+```bash
+python src/run_pipeline.py --phase all
+```
+
+---
+
+## Configuración
+
+Todos los parámetros centralizados en `src/config.py`:
+
+| Parámetro | Valor | Descripción |
+|-----------|-------|-------------|
+| `EMBEDDING_DIM` | 256 | Dimensión embeddings KGE |
+| `N_EPOCHS` | 200 | Épocas de entrenamiento |
+| `BATCH_SIZE` | 2048 | Batch size (A100 40GB) |
+| `NEG_PER_POS` | 50 | Negativos por tripleta positiva |
+| `VLLM_BASE_URL` | `http://localhost:8000/v1` | Endpoint del servidor vLLM |
+| `DEFAULT_MODEL` | `meta-llama/Meta-Llama-3-8B-Instruct` | Modelo LLM |
+| `MAX_NEW_TOKENS` | 128 | Tokens máximos de respuesta |
+| `EVAL_SAMPLE_N` | 200 | Muestras por split en validación |
+| `TOP_K_PREDICT` | 10 | Top-K en link prediction |
+
+---
+
+## Logs de ejecución
+
+Cada ejecución de `run_pipeline.py` genera automáticamente un fichero de log en `out/logs/` con el timestamp y la fase ejecutada:
+
+```
+out/logs/pipeline_20260324_143022_phase6.log
+out/logs/pipeline_20260324_090011_phaseall.log
+```
+
+El fichero captura toda la salida de la terminal (progreso, métricas, errores).
+
+---
+
+## Literatura de Referencia
+
+| Paper | Autores |
+|-------|---------|
+| *Let Your Graph Do the Talking: Encoding Structured Data for LLMs* | Perozzi et al. (2024) |
+| *Injecting Knowledge Graphs into Large Language Models* | Coppolillo (2024) |
+| *Talk Like a Graph: Encoding Graphs for Large Language Models* | Fatemi et al. (2024) |
+| *Can Knowledge Graphs Reduce Hallucinations in LLMs? A Survey* | Agrawal et al. (2024) |
+| *Neurosymbolic AI for Enhancing Instructability in Generative AI* | Sheth et al. (2023) |

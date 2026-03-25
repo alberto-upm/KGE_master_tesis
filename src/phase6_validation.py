@@ -23,9 +23,11 @@ Uso:
 """
 
 import argparse
+import csv
 import json
 import random
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -301,6 +303,110 @@ def run_chain_evaluation(
 
 
 # ---------------------------------------------------------------------------
+# Exportación CSV
+# ---------------------------------------------------------------------------
+
+def _export_csvs(results: dict, all_predictions: list[dict], run_dir: Path) -> None:
+    """
+    Genera tres CSV en run_dir/:
+
+    results_summary.csv  — métricas globales (1 fila por split)
+    results_by_type.csv  — desglose por tipo de pregunta / tipo de cadena
+    predictions.csv      — detalle de cada predicción individual
+    """
+    out = run_dir
+
+    # ── 1. results_summary.csv ────────────────────────────────────────────
+    summary_file = out / "results_summary.csv"
+    m1   = results["1hop"]
+    mc   = results["chains"]
+    bs1  = m1.get("bertscore", {})
+    bsc  = mc.get("bertscore", {})
+    hits = results.get("hit_at_k_pykeen", {})
+
+    rows_summary = [
+        {
+            "split":           "1hop",
+            "n":               m1["n_samples"],
+            "exact_match":     m1["exact_match"],
+            "mean_token_f1":   m1["mean_token_f1"],
+            "bertscore_p":     bs1.get("precision", ""),
+            "bertscore_r":     bs1.get("recall", ""),
+            "bertscore_f1":    bs1.get("f1", ""),
+            "chain_accuracy":  "",
+            "n_steps":         "",
+            "step_exact_match": "",
+        },
+        {
+            "split":           "chains",
+            "n":               mc["n_chains"],
+            "exact_match":     "",
+            "mean_token_f1":   mc["mean_token_f1"],
+            "bertscore_p":     bsc.get("precision", ""),
+            "bertscore_r":     bsc.get("recall", ""),
+            "bertscore_f1":    bsc.get("f1", ""),
+            "chain_accuracy":  mc["chain_accuracy"],
+            "n_steps":         mc["n_steps"],
+            "step_exact_match": mc["step_exact_match"],
+        },
+    ]
+    # Añadir Hit@k como filas extra
+    for k, v in hits.items():
+        rows_summary.append({
+            "split": f"kge_{k}", "n": "", "exact_match": v,
+            "mean_token_f1": "", "bertscore_p": "", "bertscore_r": "",
+            "bertscore_f1": "", "chain_accuracy": "", "n_steps": "",
+            "step_exact_match": "",
+        })
+
+    with open(summary_file, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows_summary[0].keys()))
+        w.writeheader()
+        w.writerows(rows_summary)
+
+    # ── 2. results_by_type.csv ────────────────────────────────────────────
+    by_type_file = out / "results_by_type.csv"
+    rows_type = []
+    for qtype, v in m1.get("by_type", {}).items():
+        rows_type.append({
+            "split": "1hop", "type": qtype,
+            "n": v["n"], "exact_match": v["exact_match"], "token_f1": v["token_f1"],
+        })
+    for ctype, v in mc.get("by_chain_type", {}).items():
+        rows_type.append({
+            "split": "chains", "type": ctype,
+            "n": v["n"], "exact_match": v["exact_match"], "token_f1": v["token_f1"],
+        })
+
+    with open(by_type_file, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["split", "type", "n", "exact_match", "token_f1"])
+        w.writeheader()
+        w.writerows(rows_type)
+
+    # ── 3. predictions.csv ────────────────────────────────────────────────
+    pred_csv = out / "predictions.csv"
+    # Normalizar campos opcionales (chain_id, step solo existen en chains)
+    fieldnames = [
+        "split", "id", "chain_id", "step", "type",
+        "incident", "question", "expected", "predicted",
+        "exact_match", "token_f1",
+    ]
+    with open(pred_csv, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        w.writeheader()
+        for entry in all_predictions:
+            row = {k: entry.get(k, "") for k in fieldnames}
+            # Unificar el campo tipo (1hop usa "type", chains usa "chain_type")
+            if not row["type"]:
+                row["type"] = entry.get("chain_type", "")
+            w.writerow(row)
+
+    print(f"  CSV resumen   → {summary_file}")
+    print(f"  CSV por tipo  → {by_type_file}")
+    print(f"  CSV detalle   → {pred_csv}")
+
+
+# ---------------------------------------------------------------------------
 # Punto de entrada
 # ---------------------------------------------------------------------------
 
@@ -349,20 +455,24 @@ def run(
     )
 
     # ── Guardar ──────────────────────────────────────────────────────────
-    cfg.EVAL_DIR.mkdir(parents=True, exist_ok=True)
+    ts      = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = cfg.EVAL_DIR / ts
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     results = {
         "1hop":   metrics_1hop,
         "chains": metrics_chains,
         "hit_at_k_pykeen": load_pykeen_hit_metrics(),
     }
-    with open(cfg.EVAL_RESULTS_FILE, "w", encoding="utf-8") as f:
+    with open(run_dir / "results.json", "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
-    pred_file = cfg.EVAL_DIR / "predictions.jsonl"
+    pred_file = run_dir / "predictions.jsonl"
     with open(pred_file, "w", encoding="utf-8") as f:
         for entry in log_1hop + log_chains:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    _export_csvs(results, log_1hop + log_chains, run_dir)
 
     # ── Resumen ───────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
@@ -404,8 +514,9 @@ def run(
         for k, v in pykeen.items():
             print(f"    {k}: {v:.4f}")
 
-    print(f"\n  Métricas  → {cfg.EVAL_RESULTS_FILE}")
-    print(f"  Detalle   → {pred_file}")
+    print(f"\n  Directorio → {run_dir}")
+    print(f"  Métricas   → {run_dir / 'results.json'}")
+    print(f"  Detalle    → {pred_file}")
     print("\n✓ Fase 6 completada.")
     return results
 
