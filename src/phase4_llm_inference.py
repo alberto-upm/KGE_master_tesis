@@ -211,20 +211,31 @@ class KGEAugmentedLLM:
         props: dict,
         implicit_preds: Optional[list] = None,
         session_log_path: Optional[Path] = None,
+        inc_map: Optional[dict] = None,
     ) -> list[dict]:
         """
         Bucle interactivo de Q&A para una incidencia concreta.
         El usuario puede confirmar, corregir o salir ('salir').
+        Escribiendo 'incidencia <id>' se cambia la incidencia activa sin salir.
 
         Args:
             incident_id:      Etiqueta de la incidencia (ej. "incident_XYZ")
             props:            Dict {predicate: [values]} de la incidencia
             implicit_preds:   Predicciones implícitas de phase3 (opcional)
             session_log_path: Ruta donde guardar el log de la sesión
+            inc_map:          Mapa completo {incident_id: props} para cambio de incidencia
 
         Returns:
             Lista de dicts con las interacciones de la sesión.
         """
+        def _print_context(inc_id: str, sents: list[str]) -> None:
+            print(f"\n{'='*60}")
+            print(f"Incidencia activa: {inc_id}")
+            print("Contexto disponible:")
+            for s in sents:
+                print(f"  {s}")
+            print("(escribe 'incidencia <id>' para cambiar, 'salir' para terminar)\n")
+
         # Verbalizar subgrafo directo
         sentences = verbalize_props(incident_id, props)
 
@@ -235,12 +246,7 @@ class KGEAugmentedLLM:
                     f"[Implícito] {pred.get('description', str(pred))}"
                 )
 
-        print(f"\n{'='*60}")
-        print(f"Sesión para incidencia: {incident_id}")
-        print("Contexto disponible:")
-        for s in sentences:
-            print(f"  {s}")
-        print("(escribe 'salir' para terminar)\n")
+        _print_context(incident_id, sentences)
 
         session_log = []
         while True:
@@ -250,6 +256,17 @@ class KGEAugmentedLLM:
                 break
             if not question or question.lower() == "salir":
                 break
+
+            # Cambio de incidencia dentro de la sesión
+            if question.lower().startswith("incidencia "):
+                new_id = question.split(None, 1)[1].strip()
+                if inc_map and new_id in inc_map:
+                    incident_id = new_id
+                    sentences = verbalize_props(incident_id, inc_map[new_id])
+                    _print_context(incident_id, sentences)
+                else:
+                    print(f"Incidencia no encontrada: {new_id}")
+                continue
 
             print("\n[DEBUG] Contexto enviado al LLM:")
             for _s in sentences:
@@ -318,7 +335,8 @@ def run(
             return
 
         log_path = cfg.OUT_DIR / "sessions" / f"{incident_id}_session.json"
-        llm.interactive_session(incident_id, props, session_log_path=log_path)
+        llm.interactive_session(incident_id, props, session_log_path=log_path,
+                                inc_map=inc_map)
     else:
         # Demo rápido con un ejemplo del corpus
         if cfg.QA_CORPUS.exists():
