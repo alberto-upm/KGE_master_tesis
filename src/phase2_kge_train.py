@@ -84,8 +84,8 @@ def train(
         negative_sampler_kwargs=dict(num_negs_per_pos=cfg.NEG_PER_POS),
         loss="BCEWithLogitsLoss",
         evaluator="RankBasedEvaluator",
-        evaluator_kwargs=dict(filtered=True),
-        evaluation_kwargs=dict(batch_size=64),
+        evaluator_kwargs=dict(filtered=False),   # filtered=True requiere 60K×60K scores → OOM
+        evaluation_kwargs=dict(batch_size=8),    # batch pequeño para no saturar la GPU
         random_seed=cfg.RANDOM_SEED,
         device=device,
     )

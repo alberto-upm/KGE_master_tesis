@@ -53,10 +53,10 @@ EVAL_RESULTS_FILE   = EVAL_DIR / "results.json"
 # ---------------------------------------------------------------------------
 
 EMBEDDING_DIM  = 256      # 256-dim aprovecha bien la A100 (128 para CPU)
-N_EPOCHS       = 200      # más épocas → mejor convergencia en GPU
+N_EPOCHS       = 600      # más épocas → mejor convergencia en GPU
 BATCH_SIZE     = 2048     # A100 40GB puede manejar batches grandes (512 para CPU)
 LEARNING_RATE  = 1e-3
-NEG_PER_POS    = 100       # más negativos → mejor calibración (10 para CPU)
+NEG_PER_POS    = 50       # más negativos → mejor calibración (10 para CPU)
 RANDOM_SEED    = 42
 
 TRAIN_RATIO    = 0.80
