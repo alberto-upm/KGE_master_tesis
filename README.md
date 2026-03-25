@@ -119,7 +119,7 @@ Usa CUDA automáticamente si está disponible. Parámetros en `src/config.py`:
 - `EMBEDDING_DIM = 256`
 - `N_EPOCHS = 200`
 - `BATCH_SIZE = 2048`
-- `NEG_PER_POS = 50`
+- `NEG_PER_POS = 100`
 
 **Salida**:
 - `out/models/distmult/` (modelo completo PyKEEN)
