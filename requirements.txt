@@ -31,3 +31,5 @@ tqdm>=4.66.0
 
 # --- Opcional: cuantización 4-bit para modelos 7B en GPU ---
 # bitsandbytes>=0.43.1
+
+vllm==0.18.0

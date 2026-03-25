@@ -47,7 +47,7 @@ random.seed(RANDOM_SEED)
 # ---------------------------------------------------------------------------
 
 def load_graph(ttl_path: Path) -> Graph:
-    print(f"[1/5] Cargando grafo desde {ttl_path} ...")
+    print(f"Cargando grafo desde {ttl_path} ...")
     g = Graph()
     g.parse(str(ttl_path), format="turtle")
     print(f"      {len(g)} tripletas cargadas.")
@@ -69,7 +69,7 @@ def build_incident_map(g: Graph) -> dict:
         incident_label → {predicate_local: [object_label, ...], ...}
     Sólo incluye instancias de tipo repcon:incident.
     """
-    print("[2/5] Construyendo mapa de incidencias ...")
+    print("Construyendo mapa de incidencias ...")
     incidents = {}
     for subj in g.subjects(RDF.type, REPCON.incident):
         label = extract_label(subj)
@@ -119,7 +119,7 @@ def verbalize_triples(incidents: dict) -> list[dict]:
     """
     Devuelve lista de dicts con la verbalización de cada tripleta.
     """
-    print("[3/5] Verbalizando tripletas ...")
+    print("Verbalizando tripletas ...")
     verbalized = []
     for inc_label, props in incidents.items():
         for pred, values in props.items():
@@ -768,7 +768,7 @@ def main():
     save_verbalized(verbalized)
 
     # 4. Generar Q&A
-    print("[4/5] Generando preguntas Q&A ...")
+    print("Generando preguntas Q&A ...")
 
     # 1-hop: pares pregunta-respuesta directos
     qa_1hop = generate_1hop_qa(incidents, pools)
@@ -802,7 +802,7 @@ def main():
               "El grafo puede ser demasiado pequeño.")
 
     # 5. Guardar
-    print("[5/5] Guardando corpus ...")
+    print("Guardando corpus ...")
     save_qa_corpus(qa_1hop, chains)
 
     print_stats(qa_1hop, chains)
