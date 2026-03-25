@@ -84,8 +84,10 @@ def train(
         negative_sampler_kwargs=dict(num_negs_per_pos=cfg.NEG_PER_POS),
         loss="BCEWithLogitsLoss",
         evaluator="RankBasedEvaluator",
-        evaluator_kwargs=dict(filtered=False),   # filtered=True requiere 60K×60K scores → OOM
-        evaluation_kwargs=dict(batch_size=8),    # batch pequeño para no saturar la GPU
+        evaluator_kwargs=dict(filtered=True),
+        # Entrenamiento en GPU, evaluación en CPU para evitar OOM
+        # (60K entidades × 45K tripletas desborda la GPU durante el ranking)
+        evaluation_kwargs=dict(batch_size=32, device="cpu"),
         random_seed=cfg.RANDOM_SEED,
         device=device,
     )
@@ -122,9 +124,11 @@ def train(
 
     # Resumen de métricas de test
     metrics = result.metric_results.to_dict()
+    hits = metrics.get("both", {}).get("realistic", {})
     print("\n--- Métricas en test set ---")
-    for k, v in metrics.items():
-        if isinstance(v, float):
+    for k in ("hits_at_1", "hits_at_3", "hits_at_10", "mean_reciprocal_rank"):
+        v = hits.get(k)
+        if v is not None:
             print(f"  {k}: {v:.4f}")
 
     print("\n✓ Fase 2 completada.")
