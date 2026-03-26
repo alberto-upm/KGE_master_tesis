@@ -122,6 +122,16 @@ def run_phase4(model_name=None, device=cfg.DEVICE, interactive=False, incident_i
     )
 
 
+def run_phase4_2(model_name=None, device=cfg.DEVICE, interactive=False, incident_id=""):
+    from phase4_2_llm_inference import run
+    run(
+        model_name=model_name or cfg.DEFAULT_MODEL,
+        device=device,
+        interactive=interactive,
+        incident_id=incident_id,
+    )
+
+
 def run_phase5():
     """Phase 5 no tiene ejecución standalone; es una librería usada por phase4 y phase6."""
     print("La fase 5 (subgrafo de configuración) es una librería usada por las fases 4 y 6.")
@@ -151,7 +161,7 @@ def main():
     parser.add_argument(
         "--phase",
         default="all",
-        choices=["all", "1", "2", "3", "4", "5", "6"],
+        choices=["all", "1", "2", "3", "4", "4_2", "5", "6"],
         help="Fase a ejecutar (default: all)",
     )
     # Opciones Phase 2
@@ -200,6 +210,13 @@ def main():
             run_phase3(top_k=args.top_k)
         elif p == "4":
             run_phase4(
+                model_name=args.model,
+                device=args.device,
+                interactive=args.interactive,
+                incident_id=args.incident,
+            )
+        elif p == "4_2":
+            run_phase4_2(
                 model_name=args.model,
                 device=args.device,
                 interactive=args.interactive,
