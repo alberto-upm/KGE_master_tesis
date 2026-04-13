@@ -37,12 +37,13 @@ import config as cfg
 # ---------------------------------------------------------------------------
 
 def train(
-    model_name: str = 'DistMult',
-    epochs:     int   = cfg.N_EPOCHS,
-    dim:        int   = cfg.EMBEDDING_DIM,
-    batch:      int   = cfg.BATCH_SIZE,
-    lr:         float = cfg.LEARNING_RATE,
-    device:     str   = "cpu",
+    model_name:      str   = 'DistMult',
+    epochs:          int   = cfg.N_EPOCHS,
+    dim:             int   = cfg.EMBEDDING_DIM,
+    batch:           int   = cfg.BATCH_SIZE,
+    lr:              float = cfg.LEARNING_RATE,
+    device:          str   = "cpu",
+    eval_batch_size: int   = None,
 ):
     from pykeen.pipeline import pipeline
     from pykeen.triples import TriplesFactory
@@ -76,7 +77,13 @@ def train(
     print(f"      Train / Valid / Test: "
           f"{training.num_triples:,} / {validation.num_triples:,} / {testing.num_triples:,}")
 
-    print(f"\n[2/3] Entrenando {model_name}  (dim={dim}, epochs={epochs}, device={device}) ...")
+    # ComplEx usa embeddings complejos (dim real × 2) → necesita menos RAM en evaluación
+    # TransE y DistMult pueden usar batch_size mayor sin problemas
+    if eval_batch_size is None:
+        eval_batch_size = 8 if model_name.lower() == "complex" else 32
+
+    print(f"\n[2/3] Entrenando {model_name}  "
+          f"(dim={dim}, epochs={epochs}, device={device}, eval_batch={eval_batch_size}) ...")
     result = pipeline(
         training=training,
         validation=validation,
@@ -95,8 +102,9 @@ def train(
         loss="BCEWithLogitsLoss",
         evaluator="RankBasedEvaluator",
         evaluator_kwargs=dict(filtered=True),
-        # Entrenamiento en GPU, evaluación en CPU para evitar OOM
-        evaluation_kwargs=dict(batch_size=32, device="cpu"),
+        # Entrenamiento en GPU, evaluación en CPU para evitar OOM de GPU.
+        # ComplEx usa batch pequeño para evitar OOM de RAM (embeddings doble tamaño).
+        evaluation_kwargs=dict(batch_size=eval_batch_size, device="cpu"),
         random_seed=cfg.RANDOM_SEED,
         device=device,
     )

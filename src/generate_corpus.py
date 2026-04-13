@@ -755,11 +755,17 @@ def print_sample_chains(chains: list[dict], n: int = 2) -> None:
 # 6. CORPUS DE EVALUACIÓN LINK PREDICTION (por modelo KGE)
 # ---------------------------------------------------------------------------
 
-# Relaciones objetivo y sus plantillas de pregunta (sin opciones múltiples)
+# Todas las relaciones del grafo con sus plantillas de pregunta (sin opciones múltiples)
 _LP_RELATIONS = {
-    "hasTypeInc":      "¿Cuál es el tipo de la incidencia {inc}?",
-    "hasSupportGroup": "¿Cuál es el grupo de soporte de la incidencia {inc}?",
-    "hasTechnician":   "¿Qué técnico está asignado a la incidencia {inc}?",
+    "hasTypeInc":            "¿Cuál es el tipo de la incidencia {inc}?",
+    "hasStateIncident":      "¿Cuál es el estado de la incidencia {inc}?",
+    "hasTechnician":         "¿Qué técnico está asignado a la incidencia {inc}?",
+    "hasExternalTechnician": "¿Qué técnico externo está asignado a la incidencia {inc}?",
+    "incident_hasOrigin":    "¿Cuál es el origen de la incidencia {inc}?",
+    "int_hasCustomer":       "¿A qué cliente corresponde la incidencia {inc}?",
+    "hasSupportGroup":       "¿Cuál es el grupo de soporte de la incidencia {inc}?",
+    "hasSupportTeam":        "¿Cuál es el equipo de soporte de la incidencia {inc}?",
+    "hasSupportCategory":    "¿Cuál es la categoría de soporte de la incidencia {inc}?",
 }
 _LP_SAMPLES_PER_REL = 200
 
