@@ -203,7 +203,7 @@ def main():
         "--phase",
         default="all",
         choices=["all", "1", "2", "3", "4", "4_2", "5", "6",
-                 "compare", "interactive_query"],
+                 "compare", "interactive_query", "validate_pipeline"],
         help="Fase a ejecutar (default: all)",
     )
     # Opciones Phase 2 — entrenamiento KGE
@@ -302,6 +302,14 @@ def main():
                 kge_model=args.kge_model,
                 llm_model=args.model,
                 no_llm=args.no_llm,
+            )
+        elif p == "validate_pipeline":
+            from phase6_pipeline_validation import run_pipeline_validation
+            run_pipeline_validation(
+                kge_model_name=args.kge_model or 'DistMult',
+                n_samples=args.n_samples,
+                use_llm=not args.no_llm,
+                llm_model_name=args.model or cfg.DEFAULT_MODEL,
             )
         elapsed = time.time() - t0
         print(f"\n  [Fase {p}] completada en {elapsed:.1f}s\n")
