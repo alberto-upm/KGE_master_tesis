@@ -24,8 +24,6 @@ TRIPLES_DIR = DATA_DIR / "triples"
 CORPUS_DIR  = DATA_DIR / "corpus"
 
 OUT_DIR     = BASE_DIR / "out"
-MODELS_DIR  = OUT_DIR / "models" / "distmult"
-EMBED_DIR   = OUT_DIR / "embeddings"
 PRED_DIR    = OUT_DIR / "predictions"
 EVAL_DIR    = OUT_DIR / "evaluation"
 
@@ -38,15 +36,61 @@ TRAIN_TSV   = TRIPLES_DIR / "train.tsv"
 VALID_TSV   = TRIPLES_DIR / "valid.tsv"
 TEST_TSV    = TRIPLES_DIR / "test.tsv"
 
-# Embeddings exportados
-ENTITY_EMBEDDINGS   = EMBED_DIR / "entity_embeddings.pt"
-RELATION_EMBEDDINGS = EMBED_DIR / "relation_embeddings.pt"
-ENTITY_TO_ID        = EMBED_DIR / "entity_to_id.json"
-RELATION_TO_ID      = EMBED_DIR / "relation_to_id.json"
-
 # Predicciones y evaluación
 IMPLICIT_RELS_FILE  = PRED_DIR / "implicit_relations.json"
 EVAL_RESULTS_FILE   = EVAL_DIR / "results.json"
+
+# ---------------------------------------------------------------------------
+# Multi-model KGE
+# ---------------------------------------------------------------------------
+
+KGE_MODELS = ['TransE', 'DistMult', 'ComplEx']
+
+
+def model_dir(model_name: str) -> Path:
+    return OUT_DIR / "models" / model_name.lower()
+
+
+def embed_dir(model_name: str) -> Path:
+    return OUT_DIR / "embeddings" / model_name.lower()
+
+
+def entity_embeddings_path(model_name: str) -> Path:
+    return embed_dir(model_name) / "entity_embeddings.pt"
+
+
+def relation_embeddings_path(model_name: str) -> Path:
+    return embed_dir(model_name) / "relation_embeddings.pt"
+
+
+def entity_to_id_path(model_name: str) -> Path:
+    return embed_dir(model_name) / "entity_to_id.json"
+
+
+def relation_to_id_path(model_name: str) -> Path:
+    return embed_dir(model_name) / "relation_to_id.json"
+
+
+# Rutas por defecto apuntan a DistMult (backward compatibility con phase4/5/6)
+MODELS_DIR          = model_dir('distmult')
+EMBED_DIR           = embed_dir('distmult')
+ENTITY_EMBEDDINGS   = entity_embeddings_path('distmult')
+RELATION_EMBEDDINGS = relation_embeddings_path('distmult')
+ENTITY_TO_ID        = entity_to_id_path('distmult')
+RELATION_TO_ID      = relation_to_id_path('distmult')
+
+# ---------------------------------------------------------------------------
+# GLiNER2
+# ---------------------------------------------------------------------------
+
+GLINER_MODEL = "fastino/gliner2-base-v1"
+
+# ---------------------------------------------------------------------------
+# Corpus de evaluación link prediction (por modelo)
+# ---------------------------------------------------------------------------
+
+LP_EVAL_CORPUS       = CORPUS_DIR / "link_prediction_eval.json"
+MODEL_COMPARISON_DIR = EVAL_DIR / "model_comparison"
 
 # ---------------------------------------------------------------------------
 # Hiperparámetros KGE (DistMult)

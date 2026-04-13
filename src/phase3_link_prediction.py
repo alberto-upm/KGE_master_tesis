@@ -1,7 +1,7 @@
 """
 Fase 3 — Inferencia de relaciones latentes (link prediction).
 
-Usa el modelo DistMult entrenado en phase2 para predecir entidades
+Usa cualquier modelo KGE entrenado en phase2 para predecir entidades
 tail dada una cabeza y una relación, e inferir patrones implícitos
 en el grafo de incidencias.
 
@@ -9,7 +9,7 @@ Salida:
   out/predictions/implicit_relations.json
 
 Uso:
-  python src/phase3_link_prediction.py [--top-k 10]
+  python src/phase3_link_prediction.py [--top-k 10] [--model DistMult]
 """
 
 import argparse
@@ -27,16 +27,18 @@ import config as cfg
 # Carga del modelo y fábrica de tripletas
 # ---------------------------------------------------------------------------
 
-def load_model_and_factory():
-    """Carga el modelo PyKEEN guardado y la factory de entrenamiento."""
-    from pykeen.models import DistMult
+def load_model_by_name(model_name: str = 'DistMult'):
+    """
+    Carga un modelo KGE entrenado por nombre desde out/models/<model_name>/.
+    Retorna (model, training_factory).
+    """
     from pykeen.triples import TriplesFactory
 
-    model_path = cfg.MODELS_DIR / "trained_model.pkl"
+    model_path = cfg.model_dir(model_name) / "trained_model.pkl"
     if not model_path.exists():
         raise FileNotFoundError(
             f"Modelo no encontrado: {model_path}\n"
-            "Ejecuta primero:  python src/phase2_kge_train.py"
+            f"Ejecuta primero:  python src/phase2_kge_train.py --model {model_name}"
         )
 
     model = torch.load(model_path, map_location="cpu", weights_only=False)
@@ -44,6 +46,11 @@ def load_model_and_factory():
 
     training_factory = TriplesFactory.from_path(cfg.TRAIN_TSV)
     return model, training_factory
+
+
+def load_model_and_factory():
+    """Carga el modelo DistMult (backward compatibility)."""
+    return load_model_by_name('DistMult')
 
 
 # ---------------------------------------------------------------------------
@@ -172,13 +179,13 @@ def mine_implicit_relations(
 # Punto de entrada
 # ---------------------------------------------------------------------------
 
-def run(top_k: int = cfg.TOP_K_PREDICT) -> dict:
+def run(top_k: int = cfg.TOP_K_PREDICT, model_name: str = 'DistMult') -> dict:
     print("=" * 60)
-    print("FASE 3 — Inferencia de relaciones latentes (link prediction)")
+    print(f"FASE 3 — Link prediction ({model_name})")
     print("=" * 60)
 
-    print("[1/3] Cargando modelo y factory ...")
-    model, training_factory = load_model_and_factory()
+    print(f"[1/3] Cargando modelo {model_name} y factory ...")
+    model, training_factory = load_model_by_name(model_name)
 
     print(f"[2/3] Minando relaciones implícitas (top_k={top_k}) ...")
     predictions = mine_implicit_relations(model, training_factory, top_k=top_k)
@@ -197,7 +204,9 @@ def run(top_k: int = cfg.TOP_K_PREDICT) -> dict:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Link prediction con DistMult")
+    parser = argparse.ArgumentParser(description="Link prediction con modelos KGE")
     parser.add_argument("--top-k", type=int, default=cfg.TOP_K_PREDICT)
+    parser.add_argument("--model", default="DistMult",
+                        help="Modelo KGE a usar (default: DistMult)")
     args = parser.parse_args()
-    run(top_k=args.top_k)
+    run(top_k=args.top_k, model_name=args.model)

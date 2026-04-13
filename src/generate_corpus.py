@@ -752,6 +752,86 @@ def print_sample_chains(chains: list[dict], n: int = 2) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 6. CORPUS DE EVALUACIÓN LINK PREDICTION (por modelo KGE)
+# ---------------------------------------------------------------------------
+
+# Relaciones objetivo y sus plantillas de pregunta (sin opciones múltiples)
+_LP_RELATIONS = {
+    "hasTypeInc":      "¿Cuál es el tipo de la incidencia {inc}?",
+    "hasSupportGroup": "¿Cuál es el grupo de soporte de la incidencia {inc}?",
+    "hasTechnician":   "¿Qué técnico está asignado a la incidencia {inc}?",
+}
+_LP_SAMPLES_PER_REL = 200
+
+
+def generate_link_prediction_eval_corpus(
+    ttl_path: Path = None,
+    out_path: Path = None,
+) -> list[dict]:
+    """
+    Genera data/corpus/link_prediction_eval.json para comparar modelos KGE.
+
+    Cada entrada tiene:
+      {
+        "id":          "lp_0001",
+        "subject":     "incident_X",
+        "predicate":   "hasTypeInc",
+        "object_true": "typeIncident__1",
+        "question":    "¿Cuál es el tipo de la incidencia incident_X?"
+      }
+
+    Se generan hasta _LP_SAMPLES_PER_REL entradas por relación
+    (~600 entradas en total para 3 relaciones).
+    """
+    if ttl_path is None:
+        ttl_path = TTL_FILE
+    if out_path is None:
+        out_path = cfg.LP_EVAL_CORPUS
+
+    g = load_graph(ttl_path)
+    incidents = build_incident_map(g)
+
+    entries = []
+    entry_id = 0
+
+    for predicate, question_tmpl in _LP_RELATIONS.items():
+        # Recoger todos los pares (incidencia, objeto) para este predicado
+        pairs = [
+            (inc_label, values[0])
+            for inc_label, props in incidents.items()
+            if predicate in props and props[predicate]
+            for values in [props[predicate]]
+        ]
+        # Muestrear hasta _LP_SAMPLES_PER_REL pares de forma reproducible
+        rng = random.Random(RANDOM_SEED)
+        rng.shuffle(pairs)
+        pairs = pairs[:_LP_SAMPLES_PER_REL]
+
+        for inc_label, obj in pairs:
+            entries.append({
+                "id":          f"lp_{entry_id:04d}",
+                "subject":     inc_label,
+                "predicate":   predicate,
+                "object_true": obj,
+                "question":    question_tmpl.format(inc=inc_label),
+            })
+            entry_id += 1
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(entries, f, ensure_ascii=False, indent=2)
+
+    print(f"      LP eval corpus: {len(entries)} entradas → {out_path}")
+    by_pred = defaultdict(int)
+    for e in entries:
+        by_pred[e["predicate"]] += 1
+    for pred, n in sorted(by_pred.items()):
+        print(f"        {pred}: {n}")
+
+    return entries
+
+
+# ---------------------------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------------------------
 
@@ -808,6 +888,10 @@ def main():
     print_stats(qa_1hop, chains)
     print_sample_1hop(qa_1hop, n=3)
     print_sample_chains(chains, n=2)
+
+    # 6. Corpus de evaluación link prediction
+    print("\nGenerando corpus de evaluación link prediction ...")
+    generate_link_prediction_eval_corpus()
 
     print(f"\n✓ Pipeline completado. Ficheros en: {CORPUS_DIR}")
 

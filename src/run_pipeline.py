@@ -8,16 +8,29 @@ Uso:
   python src/run_pipeline.py --phase all
 
   # Solo una fase
-  python src/run_pipeline.py --phase 1          # parseo TTL → TSV
-  python src/run_pipeline.py --phase 2          # entrenamiento DistMult
-  python src/run_pipeline.py --phase 3          # link prediction
-  python src/run_pipeline.py --phase 4          # demo LLM (no interactivo)
-  python src/run_pipeline.py --phase 5          # (sin ejecución standalone)
-  python src/run_pipeline.py --phase 6          # evaluación completa
+  python src/run_pipeline.py --phase 1             # parseo TTL → TSV
+  python src/run_pipeline.py --phase 2             # entrenamiento DistMult (por defecto)
+  python src/run_pipeline.py --phase 2 --kge-model TransE
+  python src/run_pipeline.py --phase 2 --all-models   # entrena TransE+DistMult+ComplEx
+  python src/run_pipeline.py --phase 3             # link prediction (DistMult)
+  python src/run_pipeline.py --phase 3 --kge-model ComplEx
+  python src/run_pipeline.py --phase 4             # demo LLM (no interactivo)
+  python src/run_pipeline.py --phase 5             # (sin ejecución standalone)
+  python src/run_pipeline.py --phase 6             # evaluación completa Q&A
+  python src/run_pipeline.py --phase compare       # comparación de modelos KGE
+  python src/run_pipeline.py --phase interactive_query  # sesión GLiNER+KGE+LLM
 
-  # Sesión interactiva con LLM
+  # Sesión interactiva con LLM (phase4)
   python src/run_pipeline.py --phase 4 --interactive
   python src/run_pipeline.py --phase 4 --interactive --incident incident_XYZ
+
+  # Sesión interactiva nueva (GLiNER + KGE + LLM)
+  python src/run_pipeline.py --phase interactive_query --kge-model DistMult
+  python src/run_pipeline.py --phase interactive_query --no-llm
+
+  # Comparación de modelos KGE
+  python src/run_pipeline.py --phase compare --n-samples 200
+  python src/run_pipeline.py --phase compare --verbalization-check
 
   # Opciones del modelo KGE
   python src/run_pipeline.py --phase 2 --epochs 50 --dim 64 --device cpu
@@ -30,6 +43,8 @@ Dependencias entre fases:
                    → Phase 4 (puede funcionar sin phase 3)
                    → Phase 5 (usa artefactos de phase 2)
                    → Phase 6 (usa phase 4 + phase 5)
+                   → compare (requiere phase 2 para todos los modelos)
+                   → interactive_query (requiere phase 2 para el modelo elegido)
 """
 
 import argparse
@@ -102,14 +117,40 @@ def run_phase1():
     run()
 
 
-def run_phase2(epochs=None, dim=None, device=cfg.DEVICE):
+def run_phase2(epochs=None, dim=None, device=cfg.DEVICE, kge_model=None, all_models=False):
     from phase2_kge_train import run
-    run(epochs=epochs, dim=dim, device=device)
+    run(
+        model_name=kge_model or 'DistMult',
+        epochs=epochs, dim=dim, device=device,
+        all_models=all_models,
+    )
 
 
-def run_phase3(top_k=None):
+def run_phase3(top_k=None, kge_model=None):
     from phase3_link_prediction import run
-    run(top_k=top_k or cfg.TOP_K_PREDICT)
+    run(top_k=top_k or cfg.TOP_K_PREDICT, model_name=kge_model or 'DistMult')
+
+
+def run_model_comparison(models=None, n_samples=None,
+                         verbalization_check=False, n_verb=50, verb_model='DistMult'):
+    from phase6_model_comparison import run
+    run(
+        models=models,
+        n_samples=n_samples,
+        verbalization_check=verbalization_check,
+        n_verb=n_verb,
+        verb_model=verb_model,
+    )
+
+
+def run_interactive_query(kge_model=None, llm_model=None, no_llm=False, log=None):
+    from interactive_query import interactive_query_loop
+    interactive_query_loop(
+        kge_model_name=kge_model or 'DistMult',
+        llm_model_name=llm_model or cfg.DEFAULT_MODEL,
+        use_llm=not no_llm,
+        log_path=Path(log) if log else None,
+    )
 
 
 def run_phase4(model_name=None, device=cfg.DEVICE, interactive=False, incident_id=""):
@@ -161,31 +202,43 @@ def main():
     parser.add_argument(
         "--phase",
         default="all",
-        choices=["all", "1", "2", "3", "4", "4_2", "5", "6"],
+        choices=["all", "1", "2", "3", "4", "4_2", "5", "6",
+                 "compare", "interactive_query"],
         help="Fase a ejecutar (default: all)",
     )
-    # Opciones Phase 2
+    # Opciones Phase 2 — entrenamiento KGE
     parser.add_argument("--epochs", type=int, default=None,
                         help=f"Épocas de entrenamiento (default: {cfg.N_EPOCHS})")
     parser.add_argument("--dim",    type=int, default=None,
                         help=f"Dimensión de embeddings (default: {cfg.EMBEDDING_DIM})")
     parser.add_argument("--device", default=cfg.DEVICE, choices=["cpu", "cuda"],
                         help=f"Dispositivo PyTorch (default: auto-detectado → {cfg.DEVICE})")
+    parser.add_argument("--kge-model", default=None,
+                        help=f"Modelo KGE (default: DistMult). Opciones: {cfg.KGE_MODELS}")
+    parser.add_argument("--all-models", action="store_true",
+                        help=f"Entrenar todos los modelos: {cfg.KGE_MODELS} (solo phase 2)")
     # Opciones Phase 3
     parser.add_argument("--top-k",  type=int, default=None,
                         help=f"Top-k en link prediction (default: {cfg.TOP_K_PREDICT})")
-    # Opciones Phase 4
+    # Opciones Phase 4 / interactive_query
     parser.add_argument("--model",       default=None,
-                        help=f"Modelo HuggingFace (default: {cfg.DEFAULT_MODEL})")
+                        help=f"Modelo HuggingFace para LLM (default: {cfg.DEFAULT_MODEL})")
     parser.add_argument("--interactive", action="store_true",
                         help="Activar sesión interactiva Q&A (solo phase 4)")
     parser.add_argument("--incident",    default="",
-                        help="ID de incidencia para sesión interactiva")
+                        help="ID de incidencia para sesión interactiva (phase 4)")
+    parser.add_argument("--no-llm", action="store_true",
+                        help="Desactivar LLM en interactive_query (solo KGE)")
     # Opciones Phase 6
     parser.add_argument("--n-samples",   type=int, default=None,
-                        help=f"Nº de preguntas 1-hop a evaluar (default: {cfg.EVAL_SAMPLE_N})")
+                        help=f"Nº de preguntas a evaluar (default: {cfg.EVAL_SAMPLE_N})")
     parser.add_argument("--n-chains",    type=int, default=None,
                         help=f"Nº de cadenas multi-hop a evaluar (default: {cfg.EVAL_SAMPLE_N})")
+    # Opciones compare
+    parser.add_argument("--verbalization-check", action="store_true",
+                        help="Verificar integridad de verbalización (solo phase compare)")
+    parser.add_argument("--n-verb", type=int, default=50,
+                        help="Muestras para verificación de verbalización (default: 50)")
 
     args = parser.parse_args()
     phase = args.phase
@@ -205,9 +258,12 @@ def main():
         if p == "1":
             run_phase1()
         elif p == "2":
-            run_phase2(epochs=args.epochs, dim=args.dim, device=args.device)
+            run_phase2(
+                epochs=args.epochs, dim=args.dim, device=args.device,
+                kge_model=args.kge_model, all_models=args.all_models,
+            )
         elif p == "3":
-            run_phase3(top_k=args.top_k)
+            run_phase3(top_k=args.top_k, kge_model=args.kge_model)
         elif p == "4":
             run_phase4(
                 model_name=args.model,
@@ -230,6 +286,19 @@ def main():
                 n_chains=args.n_chains,
                 model_name=args.model,
                 device=args.device,
+            )
+        elif p == "compare":
+            run_model_comparison(
+                n_samples=args.n_samples,
+                verbalization_check=args.verbalization_check,
+                n_verb=args.n_verb,
+                verb_model=args.kge_model or 'DistMult',
+            )
+        elif p == "interactive_query":
+            run_interactive_query(
+                kge_model=args.kge_model,
+                llm_model=args.model,
+                no_llm=args.no_llm,
             )
         elapsed = time.time() - t0
         print(f"\n  [Fase {p}] completada en {elapsed:.1f}s\n")
