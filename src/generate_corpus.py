@@ -903,4 +903,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description="Generación de corpus sintético Q&A y LP eval")
+    parser.add_argument("--lp-only", action="store_true",
+                        help="Generar solo link_prediction_eval.json (rápido, sin Q&A)")
+    args = parser.parse_args()
+
+    if args.lp_only:
+        print("Generando solo corpus de evaluación link prediction ...")
+        generate_link_prediction_eval_corpus()
+        print(f"\n✓ Completado. Fichero en: {cfg.LP_EVAL_CORPUS}")
+    else:
+        main()

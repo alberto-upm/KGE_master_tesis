@@ -215,6 +215,8 @@ def main():
                         help=f"Dispositivo PyTorch (default: auto-detectado → {cfg.DEVICE})")
     parser.add_argument("--kge-model", default=None,
                         help=f"Modelo KGE (default: DistMult). Opciones: {cfg.KGE_MODELS}")
+    parser.add_argument("--kge-models", nargs="+", default=None,
+                        help=f"Modelos KGE a comparar (default: todos). Ej: --kge-models TransE DistMult")
     parser.add_argument("--all-models", action="store_true",
                         help=f"Entrenar todos los modelos: {cfg.KGE_MODELS} (solo phase 2)")
     # Opciones Phase 3
@@ -289,6 +291,7 @@ def main():
             )
         elif p == "compare":
             run_model_comparison(
+                models=args.kge_models,   # None → todos los modelos en cfg.KGE_MODELS
                 n_samples=args.n_samples,
                 verbalization_check=args.verbalization_check,
                 n_verb=args.n_verb,
