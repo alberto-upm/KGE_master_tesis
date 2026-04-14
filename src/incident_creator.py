@@ -68,9 +68,11 @@ _PROP_LABELS = {
 # ---------------------------------------------------------------------------
 
 _ASK_SYSTEM_PROMPT = (
-    "Eres un asistente experto en gestión de incidencias técnicas. "
-    "Tu tarea es hacer UNA pregunta corta y natural en español para completar "
-    "un campo de la nueva incidencia. Menciona las opciones sugeridas de forma natural. "
+    "Eres un asistente que formula preguntas para completar una ficha de incidencia. "
+    "Tu tarea es hacer UNA pregunta corta y natural en español invitando al usuario "
+    "a elegir entre las opciones que se le van a mostrar (por número o por identificador exacto). "
+    "NO inventes opciones, NO sugieras valores que no estén en la lista, "
+    "NO interpretes los identificadores (son códigos opacos, no categorías). "
     "Responde SOLO con la pregunta, sin explicaciones ni encabezados."
 )
 
@@ -289,25 +291,29 @@ class IncidentCreatorSession:
     # ------------------------------------------------------------------
 
     def _llm_ask(self, prop: str, recs: list, incident: dict) -> str:
-        """Genera una pregunta natural para completar 'prop' usando el LLM."""
+        """Genera una pregunta natural invitando al usuario a elegir entre las
+        opciones que el KGE ha recomendado. NO menciona valores fuera de recs."""
         from phase4_llm_inference import verbalize_props
         label = _PROP_LABELS.get(prop, prop)
 
         filled = {k: v for k, v in incident.items() if v is not None}
-        ctx_sentences = verbalize_props("la nueva incidencia", filled) if filled else []
+        known_block = ""
+        if filled:
+            known_block = "Propiedades ya conocidas:\n" + "\n".join(
+                f"- {s}" for s in verbalize_props("la nueva incidencia", filled)
+            ) + "\n\n"
 
-        for i, (ent, freq, _score) in enumerate(recs[:3], 1):
-            ctx_sentences.append(
-                f"Opción {i} para '{label}': {ent} (aparece en {freq} casos similares)."
-            )
-
-        context_block = "\n".join(f"- {s}" for s in ctx_sentences)
+        ids_line = ", ".join(ent for ent, _, _ in recs)
+        user_prompt = (
+            f"{known_block}"
+            f"Campo a completar: '{label}'.\n"
+            f"Opciones recomendadas por el sistema (únicos valores válidos): {ids_line}.\n\n"
+            f"Formula una pregunta corta para que el usuario elija una de estas opciones. "
+            f"Indícale que puede responder con el número de la opción o con el identificador exacto."
+        )
         messages = [
             {"role": "system", "content": _ASK_SYSTEM_PROMPT},
-            {"role": "user",   "content": (
-                f"Contexto:\n{context_block}\n\n"
-                f"Formula una pregunta corta para completar el campo '{label}'."
-            )},
+            {"role": "user",   "content": user_prompt},
         ]
         resp = self._openai_client.chat.completions.create(
             model=self.llm_model_name,
@@ -344,7 +350,10 @@ class IncidentCreatorSession:
         raw = resp.choices[0].message.content.strip()
         if not raw or raw.upper() == "UNCLEAR":
             return None
-        return raw
+        # Validar que lo devuelto por el LLM es uno de los IDs del KGE.
+        # Si el LLM se inventa algo, tratarlo como UNCLEAR.
+        known_ids = {ent for ent, _, _ in recs}
+        return raw if raw in known_ids else None
 
     # ------------------------------------------------------------------
     # Loop principal
@@ -415,47 +424,55 @@ class IncidentCreatorSession:
             if self._openai_client and recs:
                 try:
                     last_question = self._llm_ask(prop, recs, incident)
-                    print(f"\n[Asistente] {last_question}")
-                    print("(skip=saltar  |  exit=salir  |  ID exacto para forzar valor)\n")
+                except Exception as e:
+                    print(f"  [!] LLM falló generando pregunta: {e}")
+                    last_question = f"¿Qué valor eliges para {label}?"
 
+                print(f"\n[Asistente] {last_question}\n")
+                print("Opciones recomendadas (KGE):")
+                for i, (ent, freq, score) in enumerate(recs, 1):
+                    marker = "►" if i == 1 else " "
+                    print(f"  {marker}{i}. {ent}  (freq: {freq}, score: {score:.3f})")
+                print("(responde con número, ID exacto, s/si = #1, skip, exit)\n")
+
+                try:
                     user_input = input("> ").strip()
                 except (EOFError, KeyboardInterrupt):
                     print("\n[Interrupción — guardando lo completado]")
                     break
 
-                cmd = user_input.lower()
-                if cmd in ("salir", "exit", "quit"):
-                    print("[Saliendo]")
+                # 1) Comandos deterministas (número, s/si, skip, exit, ID exacto)
+                chosen = self._pick_from_menu(user_input, recs, prop, label, incident)
+                if chosen == "__exit__":
                     break
-                if cmd in ("saltar", "skip"):
-                    print(f"  ⟳ {label} dejado sin rellenar.")
+                if chosen == "__skip__":
                     prop_idx += 1; recs = []; continue
 
-                # Intentar extracción con LLM
-                extracted = self._llm_extract(last_question, recs, user_input)
+                # Si _pick_from_menu devolvió el input textual tal cual, y NO es un
+                # ID conocido, delegamos al LLM para interpretar la respuesta.
+                known_ids = {ent for ent, _, _ in recs}
+                if chosen is not None and chosen in known_ids:
+                    incident[prop] = chosen
+                    print(f"  ✓ {label} = {chosen}")
+                    prop_idx += 1; recs = []
+                    continue
+
+                # 2) Intentar extracción LLM contra las opciones KGE
+                extracted = None
+                if user_input:
+                    try:
+                        extracted = self._llm_extract(last_question, recs, user_input)
+                    except Exception as e:
+                        print(f"  [!] LLM falló extrayendo respuesta: {e}")
+
                 if extracted:
                     incident[prop] = extracted
                     print(f"  ✓ {label} = {extracted}")
                     prop_idx += 1; recs = []
                 else:
-                    # Fallback: opciones numeradas
-                    print("  [No he entendido bien la respuesta. Opciones disponibles:]")
-                    for i, (ent, freq, score) in enumerate(recs, 1):
-                        print(f"    {i}. {ent}  (freq: {freq}, score: {score:.3f})")
-                    print("  (escribe el número o el identificador exacto)\n")
-                    try:
-                        user_input2 = input("> ").strip()
-                    except (EOFError, KeyboardInterrupt):
-                        break
-                    chosen = self._pick_from_menu(user_input2, recs, prop, label, incident)
-                    if chosen == "__exit__":
-                        break
-                    elif chosen == "__skip__":
-                        prop_idx += 1; recs = []
-                    elif chosen is not None:
-                        incident[prop] = chosen
-                        print(f"  ✓ {label} = {chosen}")
-                        prop_idx += 1; recs = []
+                    # 3) UNCLEAR → re-preguntar (mantener recs, no avanzar prop_idx)
+                    print("  [No he entendido la respuesta. Vuelve a intentarlo "
+                          "respondiendo con el número o el identificador exacto.]")
 
             # ---- Rama menú numerado (sin LLM o sin recomendaciones) ----
             else:
