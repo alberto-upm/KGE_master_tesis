@@ -77,29 +77,47 @@ def train(
     print(f"      Train / Valid / Test: "
           f"{training.num_triples:,} / {validation.num_triples:,} / {testing.num_triples:,}")
 
+    # Configuración por modelo:
+    # - TransE:   MarginRankingLoss + LCWA + norm L1  (diseño original del modelo)
+    # - DistMult: BCEWithLogitsLoss + sLCWA           (bilineal, funciona bien con BCE)
+    # - ComplEx:  BCEWithLogitsLoss + sLCWA           (igual que DistMult)
+    model_lower = model_name.lower()
+
+    if model_lower == "transe":
+        loss          = "MarginRankingLoss"
+        loss_kwargs   = dict(margin=9.0)      # margen estándar para TransE
+        training_loop = "LCWA"                # TransE converge mejor con LCWA
+        model_kwargs  = dict(embedding_dim=dim, scoring_fct_norm=1)  # norma L1
+    else:
+        loss          = "BCEWithLogitsLoss"
+        loss_kwargs   = {}
+        training_loop = "sLCWA"
+        model_kwargs  = dict(embedding_dim=dim)
+
     # ComplEx usa embeddings complejos (dim real × 2) → necesita menos RAM en evaluación
-    # TransE y DistMult pueden usar batch_size mayor sin problemas
     if eval_batch_size is None:
-        eval_batch_size = 8 if model_name.lower() == "complex" else 32
+        eval_batch_size = 8 if model_lower == "complex" else 32
 
     print(f"\n[2/3] Entrenando {model_name}  "
-          f"(dim={dim}, epochs={epochs}, device={device}, eval_batch={eval_batch_size}) ...")
+          f"(dim={dim}, epochs={epochs}, loss={loss}, "
+          f"loop={training_loop}, device={device}, eval_batch={eval_batch_size}) ...")
     result = pipeline(
         training=training,
         validation=validation,
         testing=testing,
         model=model_name,
-        model_kwargs=dict(embedding_dim=dim),
+        model_kwargs=model_kwargs,
         optimizer="Adam",
         optimizer_kwargs=dict(lr=lr),
-        training_loop="sLCWA",
+        training_loop=training_loop,
         training_kwargs=dict(
             num_epochs=epochs,
             batch_size=batch,
         ),
         negative_sampler="basic",
         negative_sampler_kwargs=dict(num_negs_per_pos=cfg.NEG_PER_POS),
-        loss="BCEWithLogitsLoss",
+        loss=loss,
+        loss_kwargs=loss_kwargs if loss_kwargs else None,
         evaluator="RankBasedEvaluator",
         evaluator_kwargs=dict(filtered=True),
         # Entrenamiento en GPU, evaluación en CPU para evitar OOM de GPU.

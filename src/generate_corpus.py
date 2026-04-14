@@ -771,11 +771,13 @@ _LP_SAMPLES_PER_REL = 200
 
 
 def generate_link_prediction_eval_corpus(
-    ttl_path: Path = None,
     out_path: Path = None,
 ) -> list[dict]:
     """
     Genera data/corpus/link_prediction_eval.json para comparar modelos KGE.
+
+    IMPORTANTE: usa exclusivamente las tripletas de test.tsv (el 10% que el
+    modelo NO vio durante el entrenamiento) para evitar contaminación.
 
     Cada entrada tiene:
       {
@@ -786,34 +788,51 @@ def generate_link_prediction_eval_corpus(
         "question":    "¿Cuál es el tipo de la incidencia incident_X?"
       }
 
-    Se generan hasta _LP_SAMPLES_PER_REL entradas por relación
-    (~600 entradas en total para 3 relaciones).
+    Se generan hasta _LP_SAMPLES_PER_REL entradas por relación.
     """
-    if ttl_path is None:
-        ttl_path = TTL_FILE
     if out_path is None:
         out_path = cfg.LP_EVAL_CORPUS
 
-    g = load_graph(ttl_path)
-    incidents = build_incident_map(g)
+    # Cargar solo las tripletas del conjunto de test (nunca vistas por el modelo)
+    if not cfg.TEST_TSV.exists():
+        raise FileNotFoundError(
+            f"No encontrado: {cfg.TEST_TSV}\n"
+            "Ejecuta primero:  python src/phase1_triples.py"
+        )
+
+    print(f"Cargando tripletas de test desde {cfg.TEST_TSV} ...")
+    from collections import defaultdict as _dd
+    test_by_pred: dict = _dd(list)
+    with open(cfg.TEST_TSV, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) != 3:
+                continue
+            head, relation, tail = parts
+            test_by_pred[relation].append((head, tail))
+
+    total_test = sum(len(v) for v in test_by_pred.values())
+    print(f"      {total_test} tripletas de test  |  "
+          f"{len(test_by_pred)} relaciones distintas")
 
     entries = []
     entry_id = 0
 
     for predicate, question_tmpl in _LP_RELATIONS.items():
-        # Recoger todos los pares (incidencia, objeto) para este predicado
-        pairs = [
-            (inc_label, values[0])
-            for inc_label, props in incidents.items()
-            if predicate in props and props[predicate]
-            for values in [props[predicate]]
-        ]
-        # Muestrear hasta _LP_SAMPLES_PER_REL pares de forma reproducible
-        rng = random.Random(RANDOM_SEED)
-        rng.shuffle(pairs)
-        pairs = pairs[:_LP_SAMPLES_PER_REL]
+        pairs = test_by_pred.get(predicate, [])
+        if not pairs:
+            print(f"  [Aviso] No hay tripletas de test para '{predicate}'")
+            continue
 
-        for inc_label, obj in pairs:
+        rng = random.Random(RANDOM_SEED)
+        pairs_shuffled = list(pairs)
+        rng.shuffle(pairs_shuffled)
+        pairs_shuffled = pairs_shuffled[:_LP_SAMPLES_PER_REL]
+
+        for inc_label, obj in pairs_shuffled:
             entries.append({
                 "id":          f"lp_{entry_id:04d}",
                 "subject":     inc_label,
