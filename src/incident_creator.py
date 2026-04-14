@@ -189,6 +189,37 @@ def recommend_property(
 
 
 # ---------------------------------------------------------------------------
+# Carga rápida de incidencias desde TSV (sin rdflib)
+# ---------------------------------------------------------------------------
+
+def _build_incidents_map_from_tsv() -> dict:
+    """
+    Construye incidents_map = {incident_id: {predicate: [values]}} leyendo
+    train.tsv + valid.tsv directamente, sin pasar por rdflib.
+
+    Solo incluye triples cuya cabeza sea una incidencia (empieza por 'incident_')
+    y cuya relación sea una de las propiedades relevantes (INCIDENT_PROPS).
+    """
+    prop_set = set(INCIDENT_PROPS)
+    incidents: dict = {}
+    for tsv_path in (cfg.TRAIN_TSV, cfg.VALID_TSV):
+        if not tsv_path.exists():
+            continue
+        with open(tsv_path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) != 3:
+                    continue
+                head, rel, tail = parts
+                if not head.startswith("incident_"):
+                    continue
+                if rel not in prop_set:
+                    continue
+                incidents.setdefault(head, {}).setdefault(rel, []).append(tail)
+    return incidents
+
+
+# ---------------------------------------------------------------------------
 # Sesión interactiva de creación de incidencia
 # ---------------------------------------------------------------------------
 
@@ -220,13 +251,9 @@ class IncidentCreatorSession:
         print("  Cargando recursos ...")
         print(f"{'='*60}")
 
-        # Mapa de incidencias históricas
-        from rdflib import Graph
-        from generate_corpus import build_incident_map
-        print(f"  [1/3] Cargando grafo desde {cfg.TTL_FILE} ...")
-        g = Graph()
-        g.parse(str(cfg.TTL_FILE), format="turtle")
-        self.incidents_map = build_incident_map(g)
+        # Mapa de incidencias históricas (desde TSV, sin rdflib)
+        print(f"  [1/3] Cargando incidencias desde TSV ...")
+        self.incidents_map = _build_incidents_map_from_tsv()
         print(f"        {len(self.incidents_map):,} incidencias históricas cargadas.")
 
         # Modelo KGE
