@@ -92,6 +92,19 @@ GLINER_MODEL = "fastino/gliner2-base-v1"
 LP_EVAL_CORPUS       = CORPUS_DIR / "link_prediction_eval.json"
 MODEL_COMPARISON_DIR = EVAL_DIR / "model_comparison"
 
+# Entity-to-entity evaluation corpus
+ENTITY_EVAL_CORPUS = CORPUS_DIR / "entity_to_entity_eval.json"
+
+# Pares a evaluar: (source_prop, target_prop)
+# Lectura: "dado el valor de source_prop, predice el valor de target_prop"
+ENTITY_EVAL_PAIRS = [
+    ("int_hasCustomer",  "hasTechnician"),        # empresa → técnico
+    ("hasSupportGroup",  "hasSupportCategory"),   # grupo de soporte → categoría
+    ("hasTypeInc",       "hasTechnician"),         # tipo de incidencia → técnico
+    ("int_hasCustomer",  "hasSupportGroup"),       # empresa → grupo de soporte
+    ("hasSupportGroup",  "hasTechnician"),         # grupo de soporte → técnico
+]
+
 # ---------------------------------------------------------------------------
 # Hiperparámetros KGE (DistMult)
 # ---------------------------------------------------------------------------

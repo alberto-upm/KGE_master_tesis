@@ -857,6 +857,82 @@ def generate_link_prediction_eval_corpus(
 
 
 # ---------------------------------------------------------------------------
+# 7. CORPUS DE EVALUACIÓN ENTITY-TO-ENTITY (2-hop KGE)
+# ---------------------------------------------------------------------------
+
+_ENTITY_SAMPLES_PER_PAIR = 200
+
+
+def generate_entity_to_entity_eval_corpus(out_path=None) -> list[dict]:
+    """
+    Genera data/corpus/entity_to_entity_eval.json para evaluar KGE en
+    consultas de tipo entity-to-entity (2 saltos en el grafo).
+
+    Ejemplos de pares evaluados:
+      int_hasCustomer  → hasTechnician       (empresa → técnico más probable)
+      hasSupportGroup  → hasSupportCategory  (grupo → categoría más probable)
+
+    IMPORTANTE: sólo usa incidencias de test.tsv donde AMBAS propiedades
+    están en el conjunto de test (ninguno de los dos saltos fue visto
+    durante el entrenamiento).
+
+    Cada entrada: {id, source_prop, source_value, target_prop, target_value, incident_id}
+    """
+    import random as _random
+
+    out_path = Path(out_path) if out_path else cfg.ENTITY_EVAL_CORPUS
+
+    if not cfg.TEST_TSV.exists():
+        raise FileNotFoundError(
+            f"No encontrado: {cfg.TEST_TSV}\n"
+            "Ejecuta primero: python src/phase1_triples.py"
+        )
+
+    # Conjunto de propiedades relevantes para el índice
+    relevant_props = {p for pair in cfg.ENTITY_EVAL_PAIRS for p in pair}
+
+    # Cargar test.tsv e indexar por incidencia
+    test_index: dict[str, dict[str, str]] = {}  # {incident_id: {prop: first_value}}
+    with open(cfg.TEST_TSV, "r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 3:
+                continue
+            head, rel, tail = parts[0], parts[1], parts[2]
+            if head.startswith("incident_") and rel in relevant_props:
+                # Guardar solo el primer valor encontrado por propiedad
+                test_index.setdefault(head, {}).setdefault(rel, tail)
+
+    entries = []
+    entry_id = 0
+    for source_prop, target_prop in cfg.ENTITY_EVAL_PAIRS:
+        candidates = [
+            (inc_id, props[source_prop], props[target_prop])
+            for inc_id, props in test_index.items()
+            if source_prop in props and target_prop in props
+        ]
+        _random.seed(cfg.RANDOM_SEED)
+        sample = _random.sample(candidates, min(_ENTITY_SAMPLES_PER_PAIR, len(candidates)))
+        for inc_id, src_val, tgt_val in sample:
+            entry_id += 1
+            entries.append({
+                "id":           f"e2e_{entry_id:04d}",
+                "source_prop":  source_prop,
+                "source_value": src_val,
+                "target_prop":  target_prop,
+                "target_value": tgt_val,
+                "incident_id":  inc_id,
+            })
+        print(f"      {source_prop} → {target_prop}: {len(sample)} entradas")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(entries, f, ensure_ascii=False, indent=2)
+    print(f"      entity_to_entity_eval.json: {len(entries)} entradas totales → {out_path}")
+    return entries
+
+
+# ---------------------------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------------------------
 
@@ -926,11 +1002,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generación de corpus sintético Q&A y LP eval")
     parser.add_argument("--lp-only", action="store_true",
                         help="Generar solo link_prediction_eval.json (rápido, sin Q&A)")
+    parser.add_argument("--entity", action="store_true",
+                        help="Generar solo entity_to_entity_eval.json (2-hop KGE)")
     args = parser.parse_args()
 
     if args.lp_only:
         print("Generando solo corpus de evaluación link prediction ...")
         generate_link_prediction_eval_corpus()
         print(f"\n✓ Completado. Fichero en: {cfg.LP_EVAL_CORPUS}")
+    elif args.entity:
+        print("Generando corpus de evaluación entity-to-entity ...")
+        generate_entity_to_entity_eval_corpus()
+        print(f"\n✓ Completado. Fichero en: {cfg.ENTITY_EVAL_CORPUS}")
     else:
         main()

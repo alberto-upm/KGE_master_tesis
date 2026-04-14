@@ -143,6 +143,16 @@ def run_model_comparison(models=None, n_samples=None,
     )
 
 
+def run_create_incident(kge_model=None, llm_model=None, no_llm=False, top_k=5):
+    from incident_creator import run
+    run(
+        kge_model_name=kge_model or 'DistMult',
+        use_llm=not no_llm,
+        llm_model_name=llm_model or cfg.DEFAULT_MODEL,
+        top_k=top_k,
+    )
+
+
 def run_interactive_query(kge_model=None, llm_model=None, no_llm=False, log=None):
     from interactive_query import interactive_query_loop
     interactive_query_loop(
@@ -203,7 +213,8 @@ def main():
         "--phase",
         default="all",
         choices=["all", "1", "2", "3", "4", "4_2", "5", "6",
-                 "compare", "interactive_query", "validate_pipeline"],
+                 "compare", "interactive_query", "validate_pipeline",
+                 "create_incident", "eval_incident_creator", "eval_entity"],
         help="Fase a ejecutar (default: all)",
     )
     # Opciones Phase 2 — entrenamiento KGE
@@ -310,6 +321,27 @@ def main():
                 n_samples=args.n_samples,
                 use_llm=not args.no_llm,
                 llm_model_name=args.model or cfg.DEFAULT_MODEL,
+            )
+        elif p == "create_incident":
+            run_create_incident(
+                kge_model=args.kge_model,
+                llm_model=args.model,
+                no_llm=args.no_llm,
+            )
+        elif p == "eval_incident_creator":
+            from phase6_incident_creator_eval import run as run_ic_eval
+            run_ic_eval(
+                kge_model_name=args.kge_model or "DistMult",
+                n_samples=args.n_samples,
+                use_llm=not args.no_llm,
+                llm_model_name=args.model or cfg.DEFAULT_MODEL,
+            )
+        elif p == "eval_entity":
+            from phase6_entity_eval import run as run_entity_eval
+            models = args.kge_models or ([args.kge_model] if args.kge_model else None)
+            run_entity_eval(
+                models=models,
+                n_samples=args.n_samples,
             )
         elapsed = time.time() - t0
         print(f"\n  [Fase {p}] completada en {elapsed:.1f}s\n")
