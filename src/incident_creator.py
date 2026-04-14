@@ -1,19 +1,26 @@
 """
-Creador guiado de incidencias con CBR + KGE.
+Creador guiado de incidencias con CBR + KGE + LLM conversacional.
 
-Para cada propiedad de la nueva incidencia, el sistema:
-  1. Busca incidencias históricas que coincidan con las propiedades ya conocidas (CBR)
-  2. Usa esas incidencias como proxies para predecir el siguiente valor vía KGE (predict_tails)
-  3. Presenta al usuario las top-N recomendaciones y le pide confirmación
-  4. Al completar todas las propiedades, verbaliza el resultado con el LLM y guarda en JSONL
+Flujo:
+  1. El usuario describe el problema en texto libre → se extraen entidades conocidas
+     mediante lookup contra el grafo (company__X, employee__N, typeIncident__N, ...)
+  2. Para cada propiedad pendiente:
+     a. KGE (CBR + predict_tails) genera recomendaciones basadas en incidencias similares
+     b. Si LLM disponible: el LLM formula una pregunta natural con las opciones KGE
+        como contexto. El usuario responde libremente y el LLM extrae el identificador.
+     c. Si LLM no disponible: menú numerado clásico.
+  3. Al completar todos los campos, el LLM genera un resumen final y se guarda en JSONL.
+
+El KGE es el motor de recomendación (anti-alucinación).
+El LLM es solo la interfaz conversacional, NO la fuente de conocimiento.
 
 Uso:
-  python src/incident_creator.py                         # DistMult, con LLM
+  python src/incident_creator.py                    # DistMult + LLM
   python src/incident_creator.py --kge-model TransE
-  python src/incident_creator.py --no-llm                # sin verbalización LLM
-  python src/incident_creator.py --top-k 5               # más recomendaciones por propiedad
+  python src/incident_creator.py --no-llm           # menú numerado sin LLM
+  python src/incident_creator.py --top-k 5
 
-O desde el pipeline:
+Desde el pipeline:
   python src/run_pipeline.py --phase create_incident --kge-model DistMult
 """
 
@@ -28,7 +35,7 @@ import config as cfg
 
 
 # ---------------------------------------------------------------------------
-# Orden de propiedades y etiquetas en español
+# Orden y etiquetas de propiedades
 # ---------------------------------------------------------------------------
 
 INCIDENT_PROPS = [
@@ -57,6 +64,59 @@ _PROP_LABELS = {
 
 
 # ---------------------------------------------------------------------------
+# Prompts LLM
+# ---------------------------------------------------------------------------
+
+_ASK_SYSTEM_PROMPT = (
+    "Eres un asistente experto en gestión de incidencias técnicas. "
+    "Tu tarea es hacer UNA pregunta corta y natural en español para completar "
+    "un campo de la nueva incidencia. Menciona las opciones sugeridas de forma natural. "
+    "Responde SOLO con la pregunta, sin explicaciones ni encabezados."
+)
+
+_EXTRACT_SYSTEM_PROMPT = (
+    "Eres un asistente de extracción de datos de incidencias. "
+    "El usuario respondió a una pregunta sobre un campo de incidencia. "
+    "Basándote en su respuesta y las opciones válidas, devuelve ÚNICAMENTE "
+    "el identificador exacto elegido (p.ej. employee__259, company__GB3782FUB, "
+    "typeIncident__1, supportGroup_149762...). "
+    "Si la respuesta no corresponde a ninguna opción o no es clara, devuelve: UNCLEAR"
+)
+
+
+# ---------------------------------------------------------------------------
+# Extracción de texto libre (lookup contra el grafo)
+# ---------------------------------------------------------------------------
+
+def extract_from_free_text(text: str, incidents_map: dict) -> dict[str, str]:
+    """
+    Escanea el texto libre buscando valores conocidos del grafo.
+
+    Construye un índice inverso {valor_entidad → propiedad} desde incidents_map
+    y busca coincidencias directas en el texto (case-sensitive, los IDs son opacos).
+
+    Detecta principalmente: company__XXXX, employee__N, typeIncident__N,
+    incidentOrigin__N, statusIncident__N. Los hashes largos (supportGroup_...)
+    raramente aparecen en texto libre escrito por un usuario.
+
+    Devuelve {propiedad: primer_valor_encontrado}.
+    """
+    # Índice inverso: valor → propiedad (el primero que mapee gana)
+    value_to_prop: dict[str, str] = {}
+    for props in incidents_map.values():
+        for prop, values in props.items():
+            for v in (values if isinstance(values, list) else [values]):
+                if v and v not in value_to_prop:
+                    value_to_prop[v] = prop
+
+    found: dict[str, str] = {}
+    for value, prop in value_to_prop.items():
+        if value in text and prop not in found:
+            found[prop] = value
+    return found
+
+
+# ---------------------------------------------------------------------------
 # CBR: búsqueda de incidencias históricas similares
 # ---------------------------------------------------------------------------
 
@@ -70,14 +130,10 @@ def find_matching_incidents(known_props: dict, incidents_map: dict) -> list[str]
     if not filled:
         return []
     for threshold in range(len(filled), 0, -1):
-        matches = []
-        for inc_id, props in incidents_map.items():
-            n_match = sum(
-                1 for k, v in filled.items()
-                if v in props.get(k, [])
-            )
-            if n_match >= threshold:
-                matches.append(inc_id)
+        matches = [
+            inc_id for inc_id, props in incidents_map.items()
+            if sum(1 for k, v in filled.items() if v in props.get(k, [])) >= threshold
+        ]
         if len(matches) >= 3:
             return matches
     return matches
@@ -98,11 +154,10 @@ def recommend_property(
     """
     Genera recomendaciones para target_prop combinando CBR + KGE.
 
-    Estrategia:
-      1. Encuentra proxies CBR (incidencias históricas con propiedades similares)
-      2. Para cada proxy, llama predict_tails(proxy, target_prop, top_k)
-      3. Agrega resultados: ordena por (frecuencia DESC, score_medio DESC)
-      4. Si no hay proxies: fallback con predict_heads sobre la primera prop conocida
+    1. Encuentra proxies CBR (incidencias históricas con propiedades similares)
+    2. Para cada proxy, llama predict_tails(proxy, target_prop, top_k)
+    3. Agrega por (frecuencia DESC, score_medio DESC)
+    4. Fallback si no hay proxies: predict_heads sobre la primera prop conocida
 
     Devuelve lista de (entity_label, frecuencia, score_medio) ordenada mejor primero.
     """
@@ -111,7 +166,6 @@ def recommend_property(
     proxies = find_matching_incidents(known_props, incidents_map)
 
     if not proxies:
-        # Fallback: buscar incidencias vía predicción inversa sobre la primera prop conocida
         first_prop = next((k for k, v in known_props.items() if v is not None), None)
         if first_prop:
             heads = predict_heads(model, factory, first_prop,
@@ -121,13 +175,11 @@ def recommend_property(
     if not proxies:
         return []
 
-    # Recoger predicciones de hasta 30 proxies (límite de velocidad)
     scores: dict[str, list[float]] = {}
     for proxy in proxies[:30]:
         for entity, score in predict_tails(model, factory, proxy, target_prop, top_k):
             scores.setdefault(entity, []).append(score)
 
-    # Agregar: frecuencia y score medio
     aggregated = [
         (ent, len(sc), sum(sc) / len(sc))
         for ent, sc in scores.items()
@@ -142,8 +194,13 @@ def recommend_property(
 
 class IncidentCreatorSession:
     """
-    Wizard guiado que rellena una nueva incidencia propiedad a propiedad
-    usando CBR + KGE y confirmación del usuario en cada paso.
+    Creador guiado de incidencias con CBR + KGE + conversación LLM.
+
+    Si el LLM está disponible:
+      - El LLM genera preguntas naturales con las recomendaciones KGE como contexto.
+      - El usuario responde libremente y el LLM extrae el identificador elegido.
+    Si el LLM no está disponible:
+      - Menú numerado clásico (fallback).
     """
 
     def __init__(
@@ -153,10 +210,11 @@ class IncidentCreatorSession:
         llm_model_name: str = cfg.DEFAULT_MODEL,
         top_k: int = 5,
     ):
-        self.kge_model_name = kge_model_name
-        self.use_llm = use_llm
-        self.llm_model_name = llm_model_name
-        self.top_k = top_k
+        self.kge_model_name  = kge_model_name
+        self.llm_model_name  = llm_model_name
+        self.top_k           = top_k
+        self._openai_client  = None
+        self.llm             = None  # KGEAugmentedLLM para el resumen final
 
         print(f"\n{'='*60}")
         print("  Cargando recursos ...")
@@ -177,56 +235,144 @@ class IncidentCreatorSession:
         self.model, self.factory = load_model_by_name(kge_model_name)
 
         # LLM (opcional)
-        self.llm = None
         if use_llm:
-            from phase4_llm_inference import KGEAugmentedLLM
             print(f"  [3/3] Conectando con LLM: {llm_model_name} ...")
             try:
+                from openai import OpenAI
+                from phase4_llm_inference import KGEAugmentedLLM
+                self._openai_client = OpenAI(
+                    base_url=cfg.VLLM_BASE_URL, api_key="EMPTY"
+                )
                 self.llm = KGEAugmentedLLM(
                     model_name=llm_model_name,
                     base_url=cfg.VLLM_BASE_URL,
                 )
+                print("        LLM listo (modo conversacional).")
             except Exception as e:
-                print(f"  [!] LLM no disponible: {e}. Continuando sin LLM.")
+                print(f"  [!] LLM no disponible: {e}. Usando menú numerado.")
+                self._openai_client = None
                 self.llm = None
         else:
-            print("  [3/3] Modo sin LLM.")
+            print("  [3/3] Modo sin LLM (menú numerado).")
 
         print(f"{'='*60}\n")
 
     # ------------------------------------------------------------------
+    # Métodos LLM
+    # ------------------------------------------------------------------
+
+    def _llm_ask(self, prop: str, recs: list, incident: dict) -> str:
+        """Genera una pregunta natural para completar 'prop' usando el LLM."""
+        from phase4_llm_inference import verbalize_props
+        label = _PROP_LABELS.get(prop, prop)
+
+        filled = {k: v for k, v in incident.items() if v is not None}
+        ctx_sentences = verbalize_props("la nueva incidencia", filled) if filled else []
+
+        for i, (ent, freq, _score) in enumerate(recs[:3], 1):
+            ctx_sentences.append(
+                f"Opción {i} para '{label}': {ent} (aparece en {freq} casos similares)."
+            )
+
+        context_block = "\n".join(f"- {s}" for s in ctx_sentences)
+        messages = [
+            {"role": "system", "content": _ASK_SYSTEM_PROMPT},
+            {"role": "user",   "content": (
+                f"Contexto:\n{context_block}\n\n"
+                f"Formula una pregunta corta para completar el campo '{label}'."
+            )},
+        ]
+        resp = self._openai_client.chat.completions.create(
+            model=self.llm_model_name,
+            messages=messages,
+            max_tokens=80,
+            temperature=0.3,
+        )
+        return resp.choices[0].message.content.strip()
+
+    def _llm_extract(self, question_asked: str, recs: list, user_response: str) -> str | None:
+        """
+        Extrae el identificador elegido de la respuesta libre del usuario.
+        Devuelve el identificador o None si no está claro (LLM responde UNCLEAR).
+        """
+        options_text = "\n".join(
+            f"- {ent}  (frecuencia: {freq}, score: {score:.3f})"
+            for ent, freq, score in recs
+        )
+        messages = [
+            {"role": "system", "content": _EXTRACT_SYSTEM_PROMPT},
+            {"role": "user",   "content": (
+                f"Pregunta realizada: {question_asked}\n\n"
+                f"Opciones válidas:\n{options_text}\n\n"
+                f"Respuesta del usuario: {user_response}\n\n"
+                "Identificador elegido:"
+            )},
+        ]
+        resp = self._openai_client.chat.completions.create(
+            model=self.llm_model_name,
+            messages=messages,
+            max_tokens=40,
+            temperature=0.0,
+        )
+        raw = resp.choices[0].message.content.strip()
+        if not raw or raw.upper() == "UNCLEAR":
+            return None
+        return raw
+
+    # ------------------------------------------------------------------
+    # Loop principal
+    # ------------------------------------------------------------------
 
     def run(self) -> dict:
-        """
-        Ejecuta el wizard. Devuelve el dict de la incidencia completada.
-        """
+        """Ejecuta la sesión. Devuelve el dict de la incidencia completada."""
         incident: dict[str, str | None] = {p: None for p in INCIDENT_PROPS}
 
         print("=== Creación de nueva incidencia ===\n")
-        print("Comandos: s/si/y = aceptar #1 | 2..N = elegir nº |")
-        print("          texto  = valor propio       | skip = saltar campo")
-        print("          exit   = salir (guarda lo completado hasta ahora)\n")
 
-        total = len(INCIDENT_PROPS)
-        current_idx = 0   # posición en la lista de recomendaciones (para "n/no")
-        recs: list = []   # caché de recomendaciones para el campo actual
+        # ------------------------------------------------------------------
+        # Fase 0: texto libre inicial
+        # ------------------------------------------------------------------
+        print("Describe el problema (o pulsa Enter para empezar desde cero):")
+        try:
+            free_text = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            free_text = ""
 
+        if free_text:
+            pre_filled = extract_from_free_text(free_text, self.incidents_map)
+            if pre_filled:
+                print()
+                for prop, val in pre_filled.items():
+                    incident[prop] = val
+                    label = _PROP_LABELS.get(prop, prop)
+                    print(f"  [Detectado] {label} = {val}")
+            else:
+                print("  (No se detectaron entidades conocidas en el texto)")
+            print()
+
+        if not self._openai_client:
+            print("Comandos: s/si/y = aceptar #1 | 2..N = elegir nº | "
+                  "texto = valor propio | skip = saltar | exit = salir\n")
+
+        # ------------------------------------------------------------------
+        # Fase 1: completar propiedad a propiedad
+        # ------------------------------------------------------------------
+        total    = len(INCIDENT_PROPS)
         prop_idx = 0
+        recs: list = []
+        last_question: str = ""
+
         while prop_idx < total:
-            prop = INCIDENT_PROPS[prop_idx]
+            prop  = INCIDENT_PROPS[prop_idx]
             label = _PROP_LABELS.get(prop, prop)
 
-            # Estado actual
-            filled_str = ", ".join(
-                f"{_PROP_LABELS.get(k, k)}={v}"
-                for k, v in incident.items()
-                if v is not None
-            ) or "ninguna"
+            # Saltar si ya está relleno (por texto libre o paso anterior)
+            if incident[prop] is not None:
+                prop_idx += 1
+                recs = []
+                continue
 
-            print(f"\n[{prop_idx + 1}/{total}] Completando: {label}  ({prop})")
-            print(f"Propiedades conocidas: {filled_str}")
-
-            # Calcular recomendaciones (solo si no las tenemos ya)
+            # Calcular recomendaciones una sola vez por campo
             if not recs:
                 recs = recommend_property(
                     known_props=incident,
@@ -236,134 +382,163 @@ class IncidentCreatorSession:
                     factory=self.factory,
                     top_k=self.top_k,
                 )
-                current_idx = 0
                 n_proxies = len(find_matching_incidents(incident, self.incidents_map))
-                if n_proxies:
-                    print(f"[CBR] {n_proxies} incidencias históricas similares encontradas.")
-                else:
-                    print("[CBR] Sin coincidencias exactas — usando predicción KGE directa.")
 
-            if recs:
-                print(f"[KGE] Recomendaciones para '{label}':")
-                for i, (ent, freq, score) in enumerate(recs):
-                    marker = "►" if i == current_idx else " "
-                    print(f"  {marker}{i + 1}. {ent}  (score: {score:.4f}, freq: {freq})")
+            # ---- Rama LLM conversacional ----
+            if self._openai_client and recs:
+                try:
+                    last_question = self._llm_ask(prop, recs, incident)
+                    print(f"\n[Asistente] {last_question}")
+                    print("(skip=saltar  |  exit=salir  |  ID exacto para forzar valor)\n")
+
+                    user_input = input("> ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    print("\n[Interrupción — guardando lo completado]")
+                    break
+
+                cmd = user_input.lower()
+                if cmd in ("salir", "exit", "quit"):
+                    print("[Saliendo]")
+                    break
+                if cmd in ("saltar", "skip"):
+                    print(f"  ⟳ {label} dejado sin rellenar.")
+                    prop_idx += 1; recs = []; continue
+
+                # Intentar extracción con LLM
+                extracted = self._llm_extract(last_question, recs, user_input)
+                if extracted:
+                    incident[prop] = extracted
+                    print(f"  ✓ {label} = {extracted}")
+                    prop_idx += 1; recs = []
+                else:
+                    # Fallback: opciones numeradas
+                    print("  [No he entendido bien la respuesta. Opciones disponibles:]")
+                    for i, (ent, freq, score) in enumerate(recs, 1):
+                        print(f"    {i}. {ent}  (freq: {freq}, score: {score:.3f})")
+                    print("  (escribe el número o el identificador exacto)\n")
+                    try:
+                        user_input2 = input("> ").strip()
+                    except (EOFError, KeyboardInterrupt):
+                        break
+                    chosen = self._pick_from_menu(user_input2, recs, prop, label, incident)
+                    if chosen == "__exit__":
+                        break
+                    elif chosen == "__skip__":
+                        prop_idx += 1; recs = []
+                    elif chosen is not None:
+                        incident[prop] = chosen
+                        print(f"  ✓ {label} = {chosen}")
+                        prop_idx += 1; recs = []
+
+            # ---- Rama menú numerado (sin LLM o sin recomendaciones) ----
             else:
-                print("[KGE] No se encontraron recomendaciones. Introduce un valor manualmente.")
-
-            # Leer respuesta del usuario
-            try:
-                user_input = input("\nRespuesta > ").strip()
-            except (EOFError, KeyboardInterrupt):
-                print("\n[Interrupción — guardando lo completado]")
-                break
-
-            cmd = user_input.lower()
-
-            # Salir
-            if cmd in ("salir", "exit", "quit"):
-                print("[Saliendo — guardando lo completado]")
-                break
-
-            # Saltar campo
-            if cmd in ("saltar", "skip"):
-                print(f"  ⟳ {label} dejado sin rellenar.")
-                prop_idx += 1
-                recs = []
-                continue
-
-            # Aceptar la recomendación marcada (►)
-            if cmd in ("s", "si", "y", "yes", ""):
+                filled_str = ", ".join(
+                    f"{_PROP_LABELS.get(k, k)}={v}"
+                    for k, v in incident.items() if v is not None
+                ) or "ninguna"
+                print(f"\n[{prop_idx + 1}/{total}] Completando: {label}")
+                print(f"Conocidas: {filled_str}")
+                if n_proxies:
+                    print(f"[CBR] {n_proxies} incidencias similares.")
                 if recs:
-                    chosen = recs[current_idx][0]
+                    for i, (ent, freq, score) in enumerate(recs):
+                        marker = "►" if i == 0 else " "
+                        print(f"  {marker}{i+1}. {ent}  (score: {score:.4f}, freq: {freq})")
+                else:
+                    print("[KGE] Sin recomendaciones. Escribe un valor manualmente.")
+
+                try:
+                    user_input = input("\nRespuesta > ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    break
+
+                chosen = self._pick_from_menu(user_input, recs, prop, label, incident)
+                if chosen == "__exit__":
+                    break
+                elif chosen == "__skip__":
+                    prop_idx += 1; recs = []
+                elif chosen is not None:
                     incident[prop] = chosen
-                    print(f"  ✓ {prop} = {chosen}")
-                    prop_idx += 1
-                    recs = []
-                else:
-                    print("  [!] No hay recomendación disponible. Escribe un valor.")
-                continue
+                    print(f"  ✓ {label} = {chosen}")
+                    prop_idx += 1; recs = []
 
-            # Siguiente recomendación
-            if cmd in ("n", "no"):
-                if recs:
-                    current_idx = (current_idx + 1) % len(recs)
-                    print(f"  → Siguiente recomendación: {recs[current_idx][0]}")
-                else:
-                    print("  [!] No hay más recomendaciones.")
-                continue
-
-            # Selección por número
-            if cmd.isdigit():
-                choice = int(cmd) - 1
-                if recs and 0 <= choice < len(recs):
-                    chosen = recs[choice][0]
-                    incident[prop] = chosen
-                    print(f"  ✓ {prop} = {chosen}")
-                    prop_idx += 1
-                    recs = []
-                else:
-                    print(f"  [!] Número fuera de rango (1–{len(recs)}).")
-                continue
-
-            # Valor manual libre
-            if user_input:
-                incident[prop] = user_input
-                print(f"  ✓ {prop} = {user_input}")
-                prop_idx += 1
-                recs = []
-                continue
-
-        # ------------------------------------------------------------------
-        # Verbalización y guardado
-        # ------------------------------------------------------------------
         self._finish(incident)
         return incident
 
     # ------------------------------------------------------------------
 
+    def _pick_from_menu(
+        self,
+        user_input: str,
+        recs: list,
+        prop: str,
+        label: str,
+        incident: dict,
+    ) -> str | None:
+        """
+        Interpreta la entrada del usuario en el menú numerado.
+        Devuelve: valor elegido | "__exit__" | "__skip__" | None (no reconocido)
+        """
+        cmd = user_input.lower().strip()
+
+        if cmd in ("salir", "exit", "quit"):
+            return "__exit__"
+        if cmd in ("saltar", "skip"):
+            print(f"  ⟳ {label} dejado sin rellenar.")
+            return "__skip__"
+        if cmd in ("s", "si", "y", "yes", ""):
+            if recs:
+                return recs[0][0]
+            print("  [!] No hay recomendación. Escribe un valor.")
+            return None
+        if cmd.isdigit():
+            choice = int(cmd) - 1
+            if recs and 0 <= choice < len(recs):
+                return recs[choice][0]
+            print(f"  [!] Número fuera de rango (1–{len(recs)}).")
+            return None
+        if user_input:
+            return user_input
+        return None
+
+    # ------------------------------------------------------------------
+
     def _finish(self, incident: dict) -> None:
-        """Verbaliza el incidente completado, muestra el resumen y guarda en JSONL."""
+        """Verbaliza, genera resumen LLM y guarda en JSONL."""
         from phase4_llm_inference import verbalize_props
 
         filled = {k: v for k, v in incident.items() if v is not None}
         n_filled = len(filled)
 
         print(f"\n{'='*60}")
-        print(f"  Incidencia completada ({n_filled}/{len(INCIDENT_PROPS)} campos rellenos)")
+        print(f"  Incidencia completada ({n_filled}/{len(INCIDENT_PROPS)} campos)")
         print(f"{'='*60}")
 
         if not filled:
             print("  [!] No se completó ningún campo. No se guardará.")
             return
 
-        # Verbalización de propiedades
         sentences = verbalize_props("nueva_incidencia", filled)
         print("\n  Propiedades:")
         for s in sentences:
             print(f"    · {s}")
 
-        # Resumen con LLM
         llm_summary = ""
         if self.llm and sentences:
             try:
-                question = ("Resume en una frase en español la incidencia creada "
-                            "con los datos anteriores.")
                 llm_summary = self.llm.answer(
                     context_sentences=sentences,
-                    question=question,
+                    question="Resume en una frase en español la incidencia creada.",
                     do_extract=False,
                 )
                 print(f"\n  [LLM] Resumen: \"{llm_summary}\"")
             except Exception as e:
                 print(f"\n  [!] LLM no pudo generar resumen: {e}")
 
-        # Guardar en JSONL
-        out_dir = cfg.OUT_DIR / "sessions"
+        out_dir  = cfg.OUT_DIR / "sessions"
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / "created_incidents.jsonl"
-
-        record = {
+        record   = {
             "timestamp":   datetime.now().isoformat(timespec="seconds"),
             "kge_model":   self.kge_model_name,
             "incident":    incident,
@@ -397,16 +572,16 @@ def run(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Creador guiado de incidencias con CBR + KGE"
+        description="Creador guiado de incidencias con CBR + KGE + LLM"
     )
     parser.add_argument("--kge-model", default="DistMult",
-                        help=f"Modelo KGE a usar (default: DistMult). Opciones: {cfg.KGE_MODELS}")
+                        help=f"Modelo KGE (default: DistMult). Opciones: {cfg.KGE_MODELS}")
     parser.add_argument("--no-llm", action="store_true",
-                        help="Desactivar verbalización LLM al finalizar")
+                        help="Desactivar LLM (menú numerado clásico)")
     parser.add_argument("--model", default=cfg.DEFAULT_MODEL,
                         help=f"Modelo LLM (default: {cfg.DEFAULT_MODEL})")
     parser.add_argument("--top-k", type=int, default=5,
-                        help="Número de recomendaciones a mostrar por propiedad (default: 5)")
+                        help="Recomendaciones KGE por propiedad (default: 5)")
     args = parser.parse_args()
 
     run(
