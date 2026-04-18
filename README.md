@@ -148,6 +148,22 @@ KGE_master_tesis/
 
 ## Ejecución del Pipeline paso a paso
 
+### Paso 0 — Generar el corpus de evaluación (solo si no existe)
+
+```bash
+python src/generate_corpus.py
+```
+
+Genera `data/corpus/qa_corpus.json` con ~3.700 preguntas 1-hop y ~490 cadenas multi-hop en español. Este corpus se usa para evaluar la calidad de las respuestas del LLM en las fases posteriores.
+
+**Salida**:
+- `data/corpus/qa_corpus.json` — Preguntas y respuestas para evaluación
+- `data/corpus/qa_1hop.csv` — Formato CSV para análisis
+- `data/corpus/qa_chains_flat.csv` — Cadenas multi-hop en CSV
+- `data/corpus/triples_verbalized.json` — Tripletas verbalizadas en español
+
+---
+
 ### Paso 1 — Parsear el grafo RDF a tripletas TSV
 
 ```bash
