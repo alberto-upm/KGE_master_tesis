@@ -101,7 +101,10 @@ def train(
     print(f"\n[2/3] Entrenando {model_name}  "
           f"(dim={dim}, epochs={epochs}, loss={loss}, "
           f"loop={training_loop}, device={device}, eval_batch={eval_batch_size}) ...")
-    result = pipeline(
+
+    # Construir kwargs de pipeline dinámicamente
+    # LCWA no permite negative_sampler, mientras que sLCWA sí
+    pipeline_kwargs = dict(
         training=training,
         validation=validation,
         testing=testing,
@@ -114,8 +117,6 @@ def train(
             num_epochs=epochs,
             batch_size=batch,
         ),
-        negative_sampler="basic",
-        negative_sampler_kwargs=dict(num_negs_per_pos=cfg.NEG_PER_POS),
         loss=loss,
         loss_kwargs=loss_kwargs if loss_kwargs else None,
         evaluator="RankBasedEvaluator",
@@ -127,6 +128,12 @@ def train(
         device=device,
     )
 
+    # Agregar negative_sampler solo si el training loop lo permite
+    if training_loop != "LCWA":
+        pipeline_kwargs["negative_sampler"] = "basic"
+        pipeline_kwargs["negative_sampler_kwargs"] = dict(num_negs_per_pos=cfg.NEG_PER_POS)
+
+    result = pipeline(**pipeline_kwargs)
     print(f"\n[3/3] Guardando modelo y embeddings ...")
     out_model_dir = cfg.model_dir(model_name)
     out_embed_dir = cfg.embed_dir(model_name)
@@ -148,13 +155,9 @@ def train(
     print(f"      entity_embeddings.pt  shape: {list(entity_embs.shape)}")
     print(f"      relation_embeddings.pt shape: {list(relation_embs.shape)}")
 
-    entity_to_id   = {str(k): int(v) for k, v in training.entity_to_id.items()}
-    relation_to_id = {str(k): int(v) for k, v in training.relation_to_id.items()}
-    with open(cfg.entity_to_id_path(model_name),   "w", encoding="utf-8") as f:
-        json.dump(entity_to_id, f, ensure_ascii=False, indent=2)
-    with open(cfg.relation_to_id_path(model_name), "w", encoding="utf-8") as f:
-        json.dump(relation_to_id, f, ensure_ascii=False, indent=2)
-    print(f"      Mapas id guardados en {out_embed_dir}")
+    # Los mapas entity_to_id y relation_to_id son compartidos entre modelos,
+    # así que se guardan en MAPS_DIR (ya generados por fase 1)
+    # No es necesario volver a guardarlos aquí
 
     # Resumen de métricas de test
     metrics = result.metric_results.to_dict()
