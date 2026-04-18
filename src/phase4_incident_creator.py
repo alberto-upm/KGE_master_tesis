@@ -113,7 +113,7 @@ def extract_from_free_text(text: str, incidents_map: dict) -> dict[str, str]:
 
     found: dict[str, str] = {}
     for value, prop in value_to_prop.items():
-        if value in text and prop not in found:
+        if len(value) >= 4 and value in text and prop not in found:
             found[prop] = value
     return found
 
@@ -131,6 +131,7 @@ def find_matching_incidents(known_props: dict, incidents_map: dict) -> list[str]
     filled = {k: v for k, v in known_props.items() if v is not None}
     if not filled:
         return []
+    matches = []
     for threshold in range(len(filled), 0, -1):
         matches = [
             inc_id for inc_id, props in incidents_map.items()
@@ -152,7 +153,7 @@ def recommend_property(
     model,
     factory,
     top_k: int = 5,
-) -> list[tuple[str, int, float]]:
+) -> tuple[list[tuple[str, int, float]], int]:
     """
     Genera recomendaciones para target_prop combinando CBR + KGE.
 
@@ -161,7 +162,7 @@ def recommend_property(
     3. Agrega por (frecuencia DESC, score_medio DESC)
     4. Fallback si no hay proxies: predict_heads sobre la primera prop conocida
 
-    Devuelve lista de (entity_label, frecuencia, score_medio) ordenada mejor primero.
+    Devuelve (lista de (entity_label, frecuencia, score_medio), n_proxies).
     """
     from phase3_link_prediction import predict_tails, predict_heads
 
@@ -175,8 +176,9 @@ def recommend_property(
             proxies = [h for h, _ in heads if h in incidents_map]
 
     if not proxies:
-        return []
+        return [], 0
 
+    n_proxies = len(proxies)
     scores: dict[str, list[float]] = {}
     for proxy in proxies[:30]:
         for entity, score in predict_tails(model, factory, proxy, target_prop, top_k):
@@ -187,7 +189,7 @@ def recommend_property(
         for ent, sc in scores.items()
     ]
     aggregated.sort(key=lambda x: (x[1], x[2]), reverse=True)
-    return aggregated[:top_k]
+    return aggregated[:top_k], n_proxies
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +240,7 @@ class IncidentCreatorSession:
 
     def __init__(
         self,
-        kge_model_name: str = 'DistMult',
+        kge_model_name: str = 'TransE',
         use_llm: bool = True,
         llm_model_name: str = cfg.DEFAULT_MODEL,
         top_k: int = 5,
@@ -396,6 +398,7 @@ class IncidentCreatorSession:
         total    = len(INCIDENT_PROPS)
         prop_idx = 0
         recs: list = []
+        n_proxies: int = 0
         last_question: str = ""
 
         while prop_idx < total:
@@ -410,7 +413,7 @@ class IncidentCreatorSession:
 
             # Calcular recomendaciones una sola vez por campo
             if not recs:
-                recs = recommend_property(
+                recs, n_proxies = recommend_property(
                     known_props=incident,
                     target_prop=prop,
                     incidents_map=self.incidents_map,
@@ -418,7 +421,6 @@ class IncidentCreatorSession:
                     factory=self.factory,
                     top_k=self.top_k,
                 )
-                n_proxies = len(find_matching_incidents(incident, self.incidents_map))
 
             # ---- Rama LLM conversacional ----
             if self._openai_client and recs:
@@ -502,9 +504,14 @@ class IncidentCreatorSession:
                 elif chosen == "__skip__":
                     prop_idx += 1; recs = []
                 elif chosen is not None:
-                    incident[prop] = chosen
-                    print(f"  ✓ {label} = {chosen}")
-                    prop_idx += 1; recs = []
+                    known_ids = {ent for ent, _, _ in recs}
+                    if chosen in known_ids or not recs:
+                        incident[prop] = chosen
+                        print(f"  ✓ {label} = {chosen}")
+                        prop_idx += 1; recs = []
+                    else:
+                        print(f"  [!] '{chosen}' no está entre las opciones válidas. "
+                              "Elige un número o un identificador de la lista.")
 
         self._finish(incident)
         return incident
@@ -530,7 +537,7 @@ class IncidentCreatorSession:
         if cmd in ("saltar", "skip"):
             print(f"  ⟳ {label} dejado sin rellenar.")
             return "__skip__"
-        if cmd in ("s", "si", "y", "yes", ""):
+        if cmd in ("s", "si", "y", "yes"):
             if recs:
                 return recs[0][0]
             print("  [!] No hay recomendación. Escribe un valor.")
@@ -600,7 +607,7 @@ class IncidentCreatorSession:
 # ---------------------------------------------------------------------------
 
 def run(
-    kge_model_name: str = 'DistMult',
+    kge_model_name: str = 'TransE',
     use_llm: bool = True,
     llm_model_name: str = cfg.DEFAULT_MODEL,
     top_k: int = 5,
@@ -618,7 +625,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Creador guiado de incidencias con CBR + KGE + LLM"
     )
-    parser.add_argument("--kge-model", default="DistMult",
+    parser.add_argument("--kge-model", default="TransE",
                         help=f"Modelo KGE (default: DistMult). Opciones: {cfg.KGE_MODELS}")
     parser.add_argument("--no-llm", action="store_true",
                         help="Desactivar LLM (menú numerado clásico)")

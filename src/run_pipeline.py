@@ -8,25 +8,24 @@ Uso:
   python src/run_pipeline.py --phase all
 
   # Solo una fase
-  python src/run_pipeline.py --phase 1             # parseo TTL → TSV
-  python src/run_pipeline.py --phase 2             # entrenamiento DistMult (por defecto)
+  python src/run_pipeline.py --phase 1                # parseo TTL → TSV (split por incidencias)
+  python src/run_pipeline.py --phase 2                # entrenamiento DistMult (por defecto)
   python src/run_pipeline.py --phase 2 --kge-model TransE
   python src/run_pipeline.py --phase 2 --all-models   # entrena TransE+DistMult+ComplEx
-  python src/run_pipeline.py --phase 3             # link prediction (DistMult)
+  python src/run_pipeline.py --phase 3                # link prediction (DistMult)
   python src/run_pipeline.py --phase 3 --kge-model ComplEx
-  python src/run_pipeline.py --phase 4             # demo LLM (no interactivo)
-  python src/run_pipeline.py --phase 5             # (sin ejecución standalone)
-  python src/run_pipeline.py --phase 6             # evaluación completa Q&A
-  python src/run_pipeline.py --phase compare       # comparación de modelos KGE
-  python src/run_pipeline.py --phase interactive_query  # sesión GLiNER+KGE+LLM
+  python src/run_pipeline.py --phase 5                # (sin ejecución standalone)
+  python src/run_pipeline.py --phase compare          # comparación de modelos KGE
 
-  # Sesión interactiva con LLM (phase4)
-  python src/run_pipeline.py --phase 4 --interactive
-  python src/run_pipeline.py --phase 4 --interactive --incident incident_XYZ
+  # Creación guiada de incidencias (CBR + KGE + LLM)
+  python src/run_pipeline.py --phase create_incident
+  python src/run_pipeline.py --phase create_incident --no-llm
+  python src/run_pipeline.py --phase create_incident --kge-model TransE
 
-  # Sesión interactiva nueva (GLiNER + KGE + LLM)
-  python src/run_pipeline.py --phase interactive_query --kge-model DistMult
-  python src/run_pipeline.py --phase interactive_query --no-llm
+  # Evaluación del incident creator
+  python src/run_pipeline.py --phase 6                          # eval completa
+  python src/run_pipeline.py --phase 6 --n-samples 100          # menos muestras
+  python src/run_pipeline.py --phase 6 --kge-model TransE
 
   # Comparación de modelos KGE
   python src/run_pipeline.py --phase compare --n-samples 200
@@ -35,16 +34,11 @@ Uso:
   # Opciones del modelo KGE
   python src/run_pipeline.py --phase 2 --epochs 50 --dim 64 --device cpu
 
-  # Opciones del LLM
-  python src/run_pipeline.py --phase 6 --model google/flan-t5-large --n-samples 100
-
 Dependencias entre fases:
   Phase 1 → Phase 2 → Phase 3
-                   → Phase 4 (puede funcionar sin phase 3)
-                   → Phase 5 (usa artefactos de phase 2)
-                   → Phase 6 (usa phase 4 + phase 5)
+                   → create_incident (CBR + KGE + LLM)
+                   → Phase 6 (evaluación del incident creator)
                    → compare (requiere phase 2 para todos los modelos)
-                   → interactive_query (requiere phase 2 para el modelo elegido)
 """
 
 import argparse
@@ -120,7 +114,7 @@ def run_phase1():
 def run_phase2(epochs=None, dim=None, device=cfg.DEVICE, kge_model=None, all_models=False):
     from phase2_kge_train import run
     run(
-        model_name=kge_model or 'DistMult',
+        model_name=kge_model or 'TransE',
         epochs=epochs, dim=dim, device=device,
         all_models=all_models,
     )
@@ -128,7 +122,7 @@ def run_phase2(epochs=None, dim=None, device=cfg.DEVICE, kge_model=None, all_mod
 
 def run_phase3(top_k=None, kge_model=None):
     from phase3_link_prediction import run
-    run(top_k=top_k or cfg.TOP_K_PREDICT, model_name=kge_model or 'DistMult')
+    run(top_k=top_k or cfg.TOP_K_PREDICT, model_name=kge_model or 'TransE')
 
 
 def run_model_comparison(models=None, n_samples=None,
@@ -144,58 +138,28 @@ def run_model_comparison(models=None, n_samples=None,
 
 
 def run_create_incident(kge_model=None, llm_model=None, no_llm=False, top_k=5):
-    from incident_creator import run
+    from phase4_incident_creator import run
     run(
-        kge_model_name=kge_model or 'DistMult',
+        kge_model_name=kge_model or 'TransE',
         use_llm=not no_llm,
         llm_model_name=llm_model or cfg.DEFAULT_MODEL,
         top_k=top_k,
     )
 
 
-def run_interactive_query(kge_model=None, llm_model=None, no_llm=False, log=None):
-    from interactive_query import interactive_query_loop
-    interactive_query_loop(
-        kge_model_name=kge_model or 'DistMult',
-        llm_model_name=llm_model or cfg.DEFAULT_MODEL,
-        use_llm=not no_llm,
-        log_path=Path(log) if log else None,
-    )
-
-
-def run_phase4(model_name=None, device=cfg.DEVICE, interactive=False, incident_id=""):
-    from phase4_llm_inference import run
-    run(
-        model_name=model_name or cfg.DEFAULT_MODEL,
-        device=device,
-        interactive=interactive,
-        incident_id=incident_id,
-    )
-
-
-def run_phase4_2(model_name=None, device=cfg.DEVICE, interactive=False, incident_id=""):
-    from phase4_2_llm_inference import run
-    run(
-        model_name=model_name or cfg.DEFAULT_MODEL,
-        device=device,
-        interactive=interactive,
-        incident_id=incident_id,
-    )
-
-
 def run_phase5():
-    """Phase 5 no tiene ejecución standalone; es una librería usada por phase4 y phase6."""
-    print("La fase 5 (subgrafo de configuración) es una librería usada por las fases 4 y 6.")
-    print("No tiene ejecución standalone. Ejecuta las fases 4 o 6 para activarla.")
+    """Phase 5 no tiene ejecución standalone; es una librería usada por otros módulos."""
+    print("La fase 5 (subgrafo de configuración) es una librería.")
+    print("No tiene ejecución standalone.")
 
 
-def run_phase6(n_samples=None, n_chains=None, model_name=None, device=cfg.DEVICE):
-    from phase6_validation import run
+def run_phase6(kge_model=None, n_samples=None, use_llm=False, llm_model=None):
+    from phase6_incident_creator_eval import run
     run(
-        n_samples=n_samples  or cfg.EVAL_SAMPLE_N,
-        n_chains=n_chains    or cfg.EVAL_SAMPLE_N,
-        model_name=model_name or cfg.DEFAULT_MODEL,
-        device=device,
+        kge_model_name=kge_model or 'TransE',
+        n_samples=n_samples,
+        use_llm=use_llm,
+        llm_model_name=llm_model or cfg.DEFAULT_MODEL,
     )
 
 
@@ -212,9 +176,8 @@ def main():
     parser.add_argument(
         "--phase",
         default="all",
-        choices=["all", "1", "2", "3", "4", "4_2", "5", "6",
-                 "compare", "interactive_query", "validate_pipeline",
-                 "create_incident", "eval_incident_creator", "eval_entity"],
+        choices=["all", "1", "2", "3", "5", "6",
+                 "compare", "create_incident"],
         help="Fase a ejecutar (default: all)",
     )
     # Opciones Phase 2 — entrenamiento KGE
@@ -225,7 +188,7 @@ def main():
     parser.add_argument("--device", default=cfg.DEVICE, choices=["cpu", "cuda"],
                         help=f"Dispositivo PyTorch (default: auto-detectado → {cfg.DEVICE})")
     parser.add_argument("--kge-model", default=None,
-                        help=f"Modelo KGE (default: DistMult). Opciones: {cfg.KGE_MODELS}")
+                        help=f"Modelo KGE (default: TransE). Opciones: {cfg.KGE_MODELS}")
     parser.add_argument("--kge-models", nargs="+", default=None,
                         help=f"Modelos KGE a comparar (default: todos). Ej: --kge-models TransE DistMult")
     parser.add_argument("--all-models", action="store_true",
@@ -233,20 +196,14 @@ def main():
     # Opciones Phase 3
     parser.add_argument("--top-k",  type=int, default=None,
                         help=f"Top-k en link prediction (default: {cfg.TOP_K_PREDICT})")
-    # Opciones Phase 4 / interactive_query
+    # Opciones create_incident
     parser.add_argument("--model",       default=None,
                         help=f"Modelo HuggingFace para LLM (default: {cfg.DEFAULT_MODEL})")
-    parser.add_argument("--interactive", action="store_true",
-                        help="Activar sesión interactiva Q&A (solo phase 4)")
-    parser.add_argument("--incident",    default="",
-                        help="ID de incidencia para sesión interactiva (phase 4)")
     parser.add_argument("--no-llm", action="store_true",
-                        help="Desactivar LLM en interactive_query (solo KGE)")
+                        help="Desactivar LLM (solo KGE)")
     # Opciones Phase 6
     parser.add_argument("--n-samples",   type=int, default=None,
-                        help=f"Nº de preguntas a evaluar (default: {cfg.EVAL_SAMPLE_N})")
-    parser.add_argument("--n-chains",    type=int, default=None,
-                        help=f"Nº de cadenas multi-hop a evaluar (default: {cfg.EVAL_SAMPLE_N})")
+                        help=f"Nº de incidencias a evaluar (default: {cfg.EVAL_SAMPLE_N})")
     # Opciones compare
     parser.add_argument("--verbalization-check", action="store_true",
                         help="Verificar integridad de verbalización (solo phase compare)")
@@ -263,7 +220,7 @@ def main():
     print(f"{'='*60}\n")
 
     phases_to_run = (
-        ["1", "2", "3", "4", "6"] if phase == "all" else [phase]
+        ["1", "2", "3", "create_incident", "6"] if phase == "all" else [phase]
     )
 
     for p in phases_to_run:
@@ -277,71 +234,28 @@ def main():
             )
         elif p == "3":
             run_phase3(top_k=args.top_k, kge_model=args.kge_model)
-        elif p == "4":
-            run_phase4(
-                model_name=args.model,
-                device=args.device,
-                interactive=args.interactive,
-                incident_id=args.incident,
-            )
-        elif p == "4_2":
-            run_phase4_2(
-                model_name=args.model,
-                device=args.device,
-                interactive=args.interactive,
-                incident_id=args.incident,
-            )
         elif p == "5":
             run_phase5()
         elif p == "6":
             run_phase6(
+                kge_model=args.kge_model,
                 n_samples=args.n_samples,
-                n_chains=args.n_chains,
-                model_name=args.model,
-                device=args.device,
+                use_llm=not args.no_llm,
+                llm_model=args.model,
             )
         elif p == "compare":
             run_model_comparison(
-                models=args.kge_models,   # None → todos los modelos en cfg.KGE_MODELS
+                models=args.kge_models,
                 n_samples=args.n_samples,
                 verbalization_check=args.verbalization_check,
                 n_verb=args.n_verb,
-                verb_model=args.kge_model or 'DistMult',
-            )
-        elif p == "interactive_query":
-            run_interactive_query(
-                kge_model=args.kge_model,
-                llm_model=args.model,
-                no_llm=args.no_llm,
-            )
-        elif p == "validate_pipeline":
-            from phase6_pipeline_validation import run_pipeline_validation
-            run_pipeline_validation(
-                kge_model_name=args.kge_model or 'DistMult',
-                n_samples=args.n_samples,
-                use_llm=not args.no_llm,
-                llm_model_name=args.model or cfg.DEFAULT_MODEL,
+                verb_model=args.kge_model or 'TransE',
             )
         elif p == "create_incident":
             run_create_incident(
                 kge_model=args.kge_model,
                 llm_model=args.model,
                 no_llm=args.no_llm,
-            )
-        elif p == "eval_incident_creator":
-            from phase6_incident_creator_eval import run as run_ic_eval
-            run_ic_eval(
-                kge_model_name=args.kge_model or "DistMult",
-                n_samples=args.n_samples,
-                use_llm=not args.no_llm,
-                llm_model_name=args.model or cfg.DEFAULT_MODEL,
-            )
-        elif p == "eval_entity":
-            from phase6_entity_eval import run as run_entity_eval
-            models = args.kge_models or ([args.kge_model] if args.kge_model else None)
-            run_entity_eval(
-                models=models,
-                n_samples=args.n_samples,
             )
         elapsed = time.time() - t0
         print(f"\n  [Fase {p}] completada en {elapsed:.1f}s\n")

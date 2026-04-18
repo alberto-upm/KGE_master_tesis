@@ -1,10 +1,14 @@
 """
 Fase 1 — Parseo del grafo RDF a tripletas TSV para PyKEEN.
 
+Split por incidencias: se dividen los IDs de incidencias (80/10/10)
+y todas las tripletas de cada incidencia van al mismo split.
+Tripletas cuyo head no es una incidencia van a train (entidades auxiliares).
+
 Salida:
-  data/triples/train.tsv   (80 %)
-  data/triples/valid.tsv   (10 %)
-  data/triples/test.tsv    (10 %)
+  data/triples/train.tsv   (80 % de incidencias + tripletas auxiliares)
+  data/triples/valid.tsv   (10 % de incidencias)
+  data/triples/test.tsv    (10 % de incidencias)
   out/embeddings/entity_to_id.json
   out/embeddings/relation_to_id.json
 
@@ -15,7 +19,6 @@ Uso:
 import json
 import random
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 # Añadir src/ al path para importar generate_corpus
@@ -54,33 +57,57 @@ def extract_all_triples(g) -> list[tuple[str, str, str]]:
 # División estratificada por predicado
 # ---------------------------------------------------------------------------
 
-def stratified_split(
+def split_by_incident(
     triples: list[tuple[str, str, str]],
-    train: float = cfg.TRAIN_RATIO,
-    valid: float = cfg.VALID_RATIO,
-    seed: int    = cfg.RANDOM_SEED,
+    train_ratio: float = cfg.TRAIN_RATIO,
+    valid_ratio: float = cfg.VALID_RATIO,
+    seed: int          = cfg.RANDOM_SEED,
 ) -> tuple[list, list, list]:
     """
-    Divide las tripletas en train/valid/test manteniendo proporciones
-    por predicado, para que incluso las relaciones raras aparezcan en
-    los tres splits.
+    Divide las tripletas en train/valid/test agrupando por incidencia.
+
+    1. Identifica todos los IDs de incidencia únicos (head starts with 'incident_')
+    2. Reparte los IDs de incidencias en 80/10/10
+    3. Asigna TODAS las tripletas de cada incidencia al mismo split
+    4. Tripletas cuyo head NO es una incidencia van a train (entidades auxiliares)
     """
     rng = random.Random(seed)
-    by_pred: dict[str, list] = defaultdict(list)
-    for t in triples:
-        by_pred[t[1]].append(t)
 
+    # 1. Identificar IDs de incidencias únicos
+    incident_ids = sorted({h for h, _, _ in triples if h.startswith("incident_")})
+    print(f"      Incidencias únicas: {len(incident_ids):,}")
+
+    # 2. Shuffle y split de IDs
+    rng.shuffle(incident_ids)
+    n  = len(incident_ids)
+    i1 = int(n * train_ratio)
+    i2 = int(n * (train_ratio + valid_ratio))
+    train_ids = set(incident_ids[:i1])
+    valid_ids = set(incident_ids[i1:i2])
+    test_ids  = set(incident_ids[i2:])
+
+    print(f"      Incidencias  →  train: {len(train_ids):,}  "
+          f"valid: {len(valid_ids):,}  test: {len(test_ids):,}")
+
+    # 3. Asignar tripletas según la incidencia del head
     train_set, valid_set, test_set = [], [], []
-    for pred, items in by_pred.items():
-        rng.shuffle(items)
-        n  = len(items)
-        i1 = int(n * train)
-        i2 = int(n * (train + valid))
-        train_set.extend(items[:i1])
-        valid_set.extend(items[i1:i2])
-        test_set.extend(items[i2:])
+    non_incident = 0
+    for triple in triples:
+        head = triple[0]
+        if head in train_ids:
+            train_set.append(triple)
+        elif head in valid_ids:
+            valid_set.append(triple)
+        elif head in test_ids:
+            test_set.append(triple)
+        else:
+            # Head no es una incidencia → train (auxiliares)
+            train_set.append(triple)
+            non_incident += 1
 
-    print(f"      Split  →  train: {len(train_set):,}  "
+    if non_incident:
+        print(f"      Tripletas auxiliares (no-incidencia) añadidas a train: {non_incident:,}")
+    print(f"      Tripletas  →  train: {len(train_set):,}  "
           f"valid: {len(valid_set):,}  test: {len(test_set):,}")
     return train_set, valid_set, test_set
 
@@ -142,9 +169,9 @@ def run() -> None:
     print("[1/4] Extrayendo tripletas ...")
     all_triples = extract_all_triples(g)
 
-    # 3. Dividir
-    print("[2/4] Dividiendo en train/valid/test (estratificado por predicado) ...")
-    train_triples, valid_triples, test_triples = stratified_split(all_triples)
+    # 3. Dividir por incidencias
+    print("[2/4] Dividiendo por incidencias en train/valid/test (80/10/10) ...")
+    train_triples, valid_triples, test_triples = split_by_incident(all_triples)
 
     # 4. Guardar TSV
     print("[3/4] Guardando archivos TSV ...")

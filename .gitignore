@@ -37,6 +37,7 @@ hf_cache/
 # 🧪 Notebooks
 # =========================
 .ipynb_checkpoints/
+descartes/
 
 # =========================
 # 🐍 Python

@@ -1,7 +1,7 @@
 """
 Fase 6 — Evaluación del pipeline de creación guiada de incidencias (CBR + KGE + LLM).
 
-Simula el wizard de incident_creator.py de forma automática sobre las incidencias
+Simula el wizard de phase4_incident_creator.py de forma automática sobre las incidencias
 del conjunto de test, sin intervención humana.
 
 Flujo por muestra:
@@ -48,7 +48,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
-from incident_creator import INCIDENT_PROPS, find_matching_incidents, recommend_property
+from phase4_incident_creator import INCIDENT_PROPS, recommend_property
 
 
 # ---------------------------------------------------------------------------
@@ -163,12 +163,8 @@ def evaluate_kge(
 
             true_value = true_values[0]  # primer valor (la mayoría tienen uno solo)
 
-            # Comprobar si hay proxies CBR
-            proxies = find_matching_incidents(known_props, incidents_map_no_target)
-            has_proxy = len(proxies) > 0
-
-            # Obtener recomendaciones
-            recs = recommend_property(
+            # Obtener recomendaciones (incluye n_proxies)
+            recs, n_proxies = recommend_property(
                 known_props=known_props,
                 target_prop=prop,
                 incidents_map=incidents_map_no_target,
@@ -176,6 +172,7 @@ def evaluate_kge(
                 factory=factory,
                 top_k=top_k_fetch,
             )
+            has_proxy = n_proxies > 0
             rec_entities = [ent for ent, _freq, _score in recs]
 
             # Calcular rank
