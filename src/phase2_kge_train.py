@@ -53,24 +53,22 @@ def train(
     print("=" * 60)
 
     # Verificar que existen los TSV
-    for tsv in (cfg.TRAIN_TSV, cfg.VALID_TSV, cfg.TEST_TSV):
-        if not tsv.exists():
-            raise FileNotFoundError(
-                f"No encontrado: {tsv}\n"
-                "Ejecuta primero:  python src/phase1_triples.py"
-            )
+    if not cfg.TRAIN_TSV.exists():
+        raise FileNotFoundError(
+            f"No encontrado: {cfg.TRAIN_TSV}\n"
+            "Ejecuta primero:  python src/phase1_triples.py"
+        )
 
-    print(f"[1/3] Cargando tripletas desde {cfg.TRIPLES_DIR} ...")
-    training = TriplesFactory.from_path(cfg.TRAIN_TSV)
-    validation = TriplesFactory.from_path(
-        cfg.VALID_TSV,
-        entity_to_id=training.entity_to_id,
-        relation_to_id=training.relation_to_id,
-    )
-    testing = TriplesFactory.from_path(
-        cfg.TEST_TSV,
-        entity_to_id=training.entity_to_id,
-        relation_to_id=training.relation_to_id,
+    print(f"[1/3] Cargando tripletas desde {cfg.TRAIN_TSV} ...")
+    # Cargar TODAS las tripletas del train.tsv (que contiene todo el grafo)
+    # PyKEEN hará el split internamente, garantizando cobertura de vocabulario
+    full = TriplesFactory.from_path(cfg.TRAIN_TSV)
+    print(f"      Total de tripletas cargadas: {full.num_triples:,}")
+
+    # Split con garantía de PyKEEN: todas las entidades de valid/test están en train
+    training, validation, testing = full.split(
+        ratios=[cfg.TRAIN_RATIO, cfg.VALID_RATIO, 1.0 - cfg.TRAIN_RATIO - cfg.VALID_RATIO],
+        random_state=cfg.RANDOM_SEED,
     )
     print(f"      Entidades:  {training.num_entities:,}")
     print(f"      Relaciones: {training.num_relations:,}")
