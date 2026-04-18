@@ -125,14 +125,15 @@ KGE_master_tesis/
 ├── figuras/
 │   └── hugginface_token.png      # Guía de configuración de token HuggingFace
 ├── out/
+│   ├── maps/                     # Mapas entity_to_id / relation_to_id (compartidos)
 │   ├── models/
 │   │   ├── transe/               # Modelo TransE entrenado (PyKEEN)
 │   │   ├── distmult/             # Modelo DistMult entrenado (PyKEEN)
 │   │   └── complex/              # Modelo ComplEx entrenado (PyKEEN)
 │   ├── embeddings/
-│   │   ├── transe/               # Embeddings TransE (.pt + .json)
-│   │   ├── distmult/             # Embeddings DistMult (.pt + .json)
-│   │   └── complex/              # Embeddings ComplEx (.pt + .json)
+│   │   ├── transe/               # Embeddings TransE (.pt)
+│   │   ├── distmult/             # Embeddings DistMult (.pt)
+│   │   └── complex/              # Embeddings ComplEx (.pt)
 │   ├── predictions/              # Relaciones latentes inferidas
 │   ├── evaluation/
 │   │   ├── incident_creator/     # Resultados evaluación incident creator
@@ -175,8 +176,8 @@ python src/run_pipeline.py --phase 1
 - `data/triples/train.tsv` (80%)
 - `data/triples/valid.tsv` (10%)
 - `data/triples/test.tsv` (10%)
-- `out/embeddings/entity_to_id.json`
-- `out/embeddings/relation_to_id.json`
+- `out/maps/entity_to_id.json` (mapas compartidos entre modelos)
+- `out/maps/relation_to_id.json`
 
 ---
 

@@ -9,8 +9,8 @@ Salida:
   data/triples/train.tsv   (80 % de incidencias + tripletas auxiliares)
   data/triples/valid.tsv   (10 % de incidencias)
   data/triples/test.tsv    (10 % de incidencias)
-  out/embeddings/entity_to_id.json
-  out/embeddings/relation_to_id.json
+  out/maps/entity_to_id.json
+  out/maps/relation_to_id.json
 
 Uso:
   python src/phase1_triples.py
@@ -133,7 +133,7 @@ def build_and_save_mappings(
 ) -> tuple[dict, dict]:
     """
     Construye entity_to_id y relation_to_id con índices enteros.
-    Los guarda en out/embeddings/ como JSON.
+    Los guarda en out/maps/ como JSON (compartidos entre modelos).
     """
     entities  = sorted({t[0] for t in all_triples} | {t[2] for t in all_triples})
     relations = sorted({t[1] for t in all_triples})
@@ -141,7 +141,7 @@ def build_and_save_mappings(
     entity_to_id   = {e: i for i, e in enumerate(entities)}
     relation_to_id = {r: i for i, r in enumerate(relations)}
 
-    cfg.EMBED_DIR.mkdir(parents=True, exist_ok=True)
+    cfg.MAPS_DIR.mkdir(parents=True, exist_ok=True)
     with open(cfg.ENTITY_TO_ID,   "w", encoding="utf-8") as f:
         json.dump(entity_to_id,   f, ensure_ascii=False, indent=2)
     with open(cfg.RELATION_TO_ID, "w", encoding="utf-8") as f:
@@ -149,7 +149,7 @@ def build_and_save_mappings(
 
     print(f"      Entidades únicas:  {len(entity_to_id):,}")
     print(f"      Relaciones únicas: {len(relation_to_id):,}")
-    print(f"      Mapas guardados en {cfg.EMBED_DIR}")
+    print(f"      Mapas guardados en {cfg.MAPS_DIR}")
     return entity_to_id, relation_to_id
 
 

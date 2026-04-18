@@ -24,6 +24,7 @@ TRIPLES_DIR = DATA_DIR / "triples"
 CORPUS_DIR  = DATA_DIR / "corpus"
 
 OUT_DIR     = BASE_DIR / "out"
+MAPS_DIR    = OUT_DIR / "maps"  # Mapas entity_to_id / relation_to_id (compartidos)
 PRED_DIR    = OUT_DIR / "predictions"
 EVAL_DIR    = OUT_DIR / "evaluation"
 
@@ -63,21 +64,15 @@ def relation_embeddings_path(model_name: str) -> Path:
     return embed_dir(model_name) / "relation_embeddings.pt"
 
 
-def entity_to_id_path(model_name: str) -> Path:
-    return embed_dir(model_name) / "entity_to_id.json"
+# Mapas compartidos (independientes del modelo KGE)
+ENTITY_TO_ID        = MAPS_DIR / "entity_to_id.json"
+RELATION_TO_ID      = MAPS_DIR / "relation_to_id.json"
 
-
-def relation_to_id_path(model_name: str) -> Path:
-    return embed_dir(model_name) / "relation_to_id.json"
-
-
-# Rutas por defecto apuntan a DistMult (backward compatibility con phase4/5/6)
-MODELS_DIR          = model_dir('distmult')
-EMBED_DIR           = embed_dir('distmult')
-ENTITY_EMBEDDINGS   = entity_embeddings_path('distmult')
-RELATION_EMBEDDINGS = relation_embeddings_path('distmult')
-ENTITY_TO_ID        = entity_to_id_path('distmult')
-RELATION_TO_ID      = relation_to_id_path('distmult')
+# Rutas por defecto para embeddings apuntan a TransE (ahora el modelo default)
+MODELS_DIR          = model_dir('transe')
+EMBED_DIR           = embed_dir('transe')
+ENTITY_EMBEDDINGS   = entity_embeddings_path('transe')
+RELATION_EMBEDDINGS = relation_embeddings_path('transe')
 
 # ---------------------------------------------------------------------------
 # GLiNER2
