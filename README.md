@@ -296,8 +296,8 @@ Todos los parámetros centralizados en `src/config.py`:
 |-----------|-------|-------------|
 | `EMBEDDING_DIM` | 256 | Dimensión embeddings KGE |
 | `N_EPOCHS` | 600 | Épocas de entrenamiento |
-| `BATCH_SIZE` | 2048 | Batch size (A100 40GB) |
-| `NEG_PER_POS` | 50 | Negativos por tripleta positiva |
+| `BATCH_SIZE` | 512 | Batch size (reduce si hay OOM en GPU) |
+| `NEG_PER_POS` | 10 | Negativos por tripleta positiva |
 | `VLLM_BASE_URL` | `http://localhost:8000/v1` | Endpoint del servidor vLLM |
 | `DEFAULT_MODEL` | `meta-llama/Meta-Llama-3-8B-Instruct` | Modelo LLM |
 | `MAX_NEW_TOKENS` | 128 | Tokens máximos de respuesta |

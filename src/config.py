@@ -104,11 +104,11 @@ ENTITY_EVAL_PAIRS = [
 # Hiperparámetros KGE (DistMult)
 # ---------------------------------------------------------------------------
 
-EMBEDDING_DIM  = 256      # 256-dim aprovecha bien la A100 (128 para CPU)
+EMBEDDING_DIM  = 256      # 256-dim (128 para GPU con memoria limitada)
 N_EPOCHS       = 600      # más épocas → mejor convergencia en GPU
-BATCH_SIZE     = 2048     # A100 40GB puede manejar batches grandes (512 para CPU)
+BATCH_SIZE     = 512      # 512 es seguro para GPUs típicas (reduce si hay OOM)
 LEARNING_RATE  = 1e-3
-NEG_PER_POS    = 50       # más negativos → mejor calibración (10 para CPU)
+NEG_PER_POS    = 10       # 10 es conservador (50 para GPUs con +40GB)
 RANDOM_SEED    = 42
 
 TRAIN_RATIO    = 0.80
