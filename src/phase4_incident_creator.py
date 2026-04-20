@@ -146,6 +146,10 @@ def find_matching_incidents(known_props: dict, incidents_map: dict) -> list[str]
 # Recomendación KGE vía proxies CBR
 # ---------------------------------------------------------------------------
 
+# Reciprocal Rank Fusion: constante de suavizado (estándar IR).
+RRF_K = 60
+
+
 def recommend_property(
     known_props: dict,
     target_prop: str,
@@ -155,14 +159,19 @@ def recommend_property(
     top_k: int = 5,
 ) -> tuple[list[tuple[str, int, float]], int]:
     """
-    Genera recomendaciones para target_prop combinando CBR + KGE.
+    Genera recomendaciones para target_prop combinando CBR + KGE mediante
+    Reciprocal Rank Fusion (RRF).
 
     1. Encuentra proxies CBR (incidencias históricas con propiedades similares)
     2. Para cada proxy, llama predict_tails(proxy, target_prop, top_k)
-    3. Agrega por (frecuencia DESC, score_medio DESC)
+    3. Para cada candidato calcula:
+         - rank_freq: posición al ordenar por frecuencia CBR (DESC)
+         - rank_kge:  posición al ordenar por score KGE medio (DESC)
+       y fusiona: RRF(o) = 1/(K + rank_freq) + 1/(K + rank_kge)
     4. Fallback si no hay proxies: predict_heads sobre la primera prop conocida
 
-    Devuelve (lista de (entity_label, frecuencia, score_medio), n_proxies).
+    Devuelve (lista de (entity_label, frecuencia, score_medio), n_proxies)
+    ordenada por RRF DESC.
     """
     from phase3_link_prediction import predict_tails, predict_heads
 
@@ -188,7 +197,21 @@ def recommend_property(
         (ent, len(sc), sum(sc) / len(sc))
         for ent, sc in scores.items()
     ]
-    aggregated.sort(key=lambda x: (x[1], x[2]), reverse=True)
+
+    # Ranking 1: por frecuencia CBR (más votos = mejor rank)
+    by_freq = sorted(aggregated, key=lambda x: x[1], reverse=True)
+    rank_freq = {ent: i + 1 for i, (ent, _, _) in enumerate(by_freq)}
+
+    # Ranking 2: por score KGE medio (mayor score = mejor rank)
+    by_kge = sorted(aggregated, key=lambda x: x[2], reverse=True)
+    rank_kge = {ent: i + 1 for i, (ent, _, _) in enumerate(by_kge)}
+
+    # Fusión RRF
+    aggregated.sort(
+        key=lambda x: 1.0 / (RRF_K + rank_freq[x[0]])
+                    + 1.0 / (RRF_K + rank_kge[x[0]]),
+        reverse=True,
+    )
     return aggregated[:top_k], n_proxies
 
 
