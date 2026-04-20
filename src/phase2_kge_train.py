@@ -83,13 +83,17 @@ def train(
     training_loop = "sLCWA"
 
     if model_lower == "transe":
-        loss          = "MarginRankingLoss"
-        loss_kwargs   = dict(margin=9.0)      # margen estándar para TransE
-        model_kwargs  = dict(embedding_dim=dim, scoring_fct_norm=1)  # norma L1
+        loss            = "MarginRankingLoss"
+        loss_kwargs     = dict(margin=1.0)
+        model_kwargs    = dict(embedding_dim=dim, scoring_fct_norm=2)
+        transe_num_negs = 64
+        transe_sampler  = "bernoulli"
     else:
-        loss          = "BCEWithLogitsLoss"
-        loss_kwargs   = {}
-        model_kwargs  = dict(embedding_dim=dim)
+        loss            = "BCEWithLogitsLoss"
+        loss_kwargs     = {}
+        model_kwargs    = dict(embedding_dim=dim)
+        transe_num_negs = cfg.NEG_PER_POS
+        transe_sampler  = "basic"
 
     # ComplEx usa embeddings complejos (dim real × 2) → necesita menos RAM en evaluación
     if eval_batch_size is None:
@@ -125,8 +129,17 @@ def train(
         device=device,
     )
 
-    pipeline_kwargs["negative_sampler"] = "basic"
-    pipeline_kwargs["negative_sampler_kwargs"] = dict(num_negs_per_pos=cfg.NEG_PER_POS)
+    pipeline_kwargs["negative_sampler"]        = transe_sampler
+    pipeline_kwargs["negative_sampler_kwargs"] = dict(num_negs_per_pos=transe_num_negs)
+
+    if model_lower == "transe":
+        pipeline_kwargs["stopper"] = "early"
+        pipeline_kwargs["stopper_kwargs"] = dict(
+            frequency=25,
+            patience=4,
+            relative_delta=0.002,
+            metric="both.realistic.inverse_harmonic_mean_rank",
+        )
 
     result = pipeline(**pipeline_kwargs)
     print(f"\n[3/3] Guardando modelo y embeddings ...")
