@@ -117,6 +117,7 @@ def train(
         training_kwargs=dict(
             num_epochs=epochs,
             batch_size=batch,
+            sub_batch_size=batch,
         ),
         loss=loss,
         loss_kwargs=loss_kwargs if loss_kwargs else None,
@@ -127,7 +128,6 @@ def train(
         evaluation_kwargs=dict(batch_size=eval_batch_size, device="cpu"),
         random_seed=cfg.RANDOM_SEED,
         device=device,
-        automatic_memory_optimization=False,
     )
 
     pipeline_kwargs["negative_sampler"]        = transe_sampler
