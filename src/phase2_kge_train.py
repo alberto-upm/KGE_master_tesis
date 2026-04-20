@@ -76,20 +76,20 @@ def train(
           f"{training.num_triples:,} / {validation.num_triples:,} / {testing.num_triples:,}")
 
     # Configuración por modelo:
-    # - TransE:   BCEWithLogitsLoss + LCWA + norm L2   (multi-clase, sin negative sampler)
+    # - TransE:   MarginRankingLoss + sLCWA + norm L2 + bernoulli (más negativos)
     # - DistMult: BCEWithLogitsLoss + sLCWA            (bilineal, funciona bien con BCE)
     # - ComplEx:  BCEWithLogitsLoss + sLCWA            (igual que DistMult)
     model_lower = model_name.lower()
 
     if model_lower == "transe":
-        loss            = "BCEWithLogitsLoss"
-        loss_kwargs     = {}
+        loss            = "MarginRankingLoss"
+        loss_kwargs     = dict(margin=1.0)
         model_kwargs    = dict(embedding_dim=dim, scoring_fct_norm=2)
-        training_loop   = "LCWA"
-        transe_num_negs = None
-        transe_sampler  = None
-        train_batch     = 32
-        train_slice     = 2048
+        training_loop   = "sLCWA"
+        transe_num_negs = 256
+        transe_sampler  = "bernoulli"
+        train_batch     = 256
+        train_slice     = None
     else:
         loss            = "BCEWithLogitsLoss"
         loss_kwargs     = {}
