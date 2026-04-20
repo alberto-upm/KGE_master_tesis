@@ -82,8 +82,8 @@ def train(
     model_lower = model_name.lower()
 
     if model_lower == "transe":
-        loss            = "MarginRankingLoss"
-        loss_kwargs     = dict(margin=9.0)
+        loss            = "NSSALoss"
+        loss_kwargs     = dict(margin=9.0, adversarial_temperature=1.0)
         model_kwargs    = dict(embedding_dim=dim, scoring_fct_norm=1)
         training_loop   = "sLCWA"
         transe_num_negs = cfg.NEG_PER_POS
