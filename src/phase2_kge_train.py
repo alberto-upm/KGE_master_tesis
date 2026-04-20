@@ -88,7 +88,8 @@ def train(
         training_loop   = "LCWA"
         transe_num_negs = None
         transe_sampler  = None
-        train_batch     = 128
+        train_batch     = 32
+        train_slice     = 2048
     else:
         loss            = "BCEWithLogitsLoss"
         loss_kwargs     = {}
@@ -97,6 +98,7 @@ def train(
         transe_num_negs = cfg.NEG_PER_POS
         transe_sampler  = "basic"
         train_batch     = batch
+        train_slice     = None
 
     # ComplEx usa embeddings complejos (dim real × 2) → necesita menos RAM en evaluación
     if eval_batch_size is None:
@@ -118,11 +120,12 @@ def train(
         optimizer_kwargs=dict(lr=lr),
         training_loop=training_loop,
         training_loop_kwargs=dict(automatic_memory_optimization=False),
-        training_kwargs=dict(
+        training_kwargs={k: v for k, v in dict(
             num_epochs=epochs,
             batch_size=train_batch,
             sub_batch_size=train_batch,
-        ),
+            slice_size=train_slice,
+        ).items() if v is not None},
         loss=loss,
         loss_kwargs=loss_kwargs if loss_kwargs else None,
         evaluator="RankBasedEvaluator",
