@@ -104,10 +104,10 @@ ENTITY_EVAL_PAIRS = [
 # Hiperparámetros KGE (DistMult)
 # ---------------------------------------------------------------------------
 
-EMBEDDING_DIM  = 256      # 256-dim (128 para GPU con memoria limitada)
-N_EPOCHS       = 600      # más épocas → mejor convergencia en GPU
-BATCH_SIZE     = 512      # 512 es seguro para GPUs típicas (reduce si hay OOM)
-LEARNING_RATE  = 1e-3
+EMBEDDING_DIM  = 512
+N_EPOCHS       = 600
+BATCH_SIZE     = 1024
+LEARNING_RATE  = 5e-4
 NEG_PER_POS    = 10       # 10 es conservador (50 para GPUs con +40GB)
 RANDOM_SEED    = 42
 

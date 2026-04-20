@@ -86,7 +86,7 @@ def train(
         loss            = "MarginRankingLoss"
         loss_kwargs     = dict(margin=1.0)
         model_kwargs    = dict(embedding_dim=dim, scoring_fct_norm=2)
-        transe_num_negs = 64
+        transe_num_negs = 128
         transe_sampler  = "bernoulli"
     else:
         loss            = "BCEWithLogitsLoss"
