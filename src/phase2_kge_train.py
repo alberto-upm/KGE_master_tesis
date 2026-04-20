@@ -88,7 +88,7 @@ def train(
         training_loop   = "sLCWA"
         transe_num_negs = 256
         transe_sampler  = "bernoulli"
-        train_batch     = 256
+        train_batch     = 1024
         train_slice     = None
     else:
         loss            = "BCEWithLogitsLoss"
