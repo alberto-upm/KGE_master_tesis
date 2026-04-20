@@ -76,24 +76,27 @@ def train(
           f"{training.num_triples:,} / {validation.num_triples:,} / {testing.num_triples:,}")
 
     # Configuración por modelo:
-    # - TransE:   MarginRankingLoss + sLCWA + norm L1  (diseño original Bordes 2013)
+    # - TransE:   BCEWithLogitsLoss + LCWA + norm L2   (multi-clase, sin negative sampler)
     # - DistMult: BCEWithLogitsLoss + sLCWA            (bilineal, funciona bien con BCE)
     # - ComplEx:  BCEWithLogitsLoss + sLCWA            (igual que DistMult)
     model_lower = model_name.lower()
-    training_loop = "sLCWA"
 
     if model_lower == "transe":
-        loss            = "MarginRankingLoss"
-        loss_kwargs     = dict(margin=1.0)
+        loss            = "BCEWithLogitsLoss"
+        loss_kwargs     = {}
         model_kwargs    = dict(embedding_dim=dim, scoring_fct_norm=2)
-        transe_num_negs = 128
-        transe_sampler  = "bernoulli"
+        training_loop   = "LCWA"
+        transe_num_negs = None
+        transe_sampler  = None
+        train_batch     = 128
     else:
         loss            = "BCEWithLogitsLoss"
         loss_kwargs     = {}
         model_kwargs    = dict(embedding_dim=dim)
+        training_loop   = "sLCWA"
         transe_num_negs = cfg.NEG_PER_POS
         transe_sampler  = "basic"
+        train_batch     = batch
 
     # ComplEx usa embeddings complejos (dim real × 2) → necesita menos RAM en evaluación
     if eval_batch_size is None:
@@ -116,8 +119,8 @@ def train(
         training_loop=training_loop,
         training_kwargs=dict(
             num_epochs=epochs,
-            batch_size=batch,
-            sub_batch_size=batch,
+            batch_size=train_batch,
+            sub_batch_size=train_batch,
         ),
         loss=loss,
         loss_kwargs=loss_kwargs if loss_kwargs else None,
@@ -130,8 +133,9 @@ def train(
         device=device,
     )
 
-    pipeline_kwargs["negative_sampler"]        = transe_sampler
-    pipeline_kwargs["negative_sampler_kwargs"] = dict(num_negs_per_pos=transe_num_negs)
+    if training_loop != "LCWA":
+        pipeline_kwargs["negative_sampler"]        = transe_sampler
+        pipeline_kwargs["negative_sampler_kwargs"] = dict(num_negs_per_pos=transe_num_negs)
 
     result = pipeline(**pipeline_kwargs)
     print(f"\n[3/3] Guardando modelo y embeddings ...")

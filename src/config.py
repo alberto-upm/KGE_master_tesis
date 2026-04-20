@@ -106,7 +106,7 @@ ENTITY_EVAL_PAIRS = [
 
 EMBEDDING_DIM  = 512
 N_EPOCHS       = 600
-BATCH_SIZE     = 512
+BATCH_SIZE     = 2048
 LEARNING_RATE  = 5e-4
 NEG_PER_POS    = 10       # 10 es conservador (50 para GPUs con +40GB)
 RANDOM_SEED    = 42
