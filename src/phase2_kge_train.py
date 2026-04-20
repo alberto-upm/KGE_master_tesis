@@ -117,6 +117,7 @@ def train(
         optimizer="Adam",
         optimizer_kwargs=dict(lr=lr),
         training_loop=training_loop,
+        training_loop_kwargs=dict(automatic_memory_optimization=False),
         training_kwargs=dict(
             num_epochs=epochs,
             batch_size=train_batch,
