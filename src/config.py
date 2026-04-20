@@ -108,7 +108,7 @@ EMBEDDING_DIM  = 256
 N_EPOCHS       = 600
 BATCH_SIZE     = 2048
 LEARNING_RATE  = 1e-3
-NEG_PER_POS    = 50       # 50 default A100, 10 fallback CPU
+NEG_PER_POS    = 128      # 128 para NSSA (escala con negativos), 50 default A100, 10 fallback CPU
 RANDOM_SEED    = 42
 
 TRAIN_RATIO    = 0.80
