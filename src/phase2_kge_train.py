@@ -44,6 +44,7 @@ def train(
     lr:              float = cfg.LEARNING_RATE,
     device:          str   = "cpu",
     eval_batch_size: int   = None,
+    margin:          float = 9.0,
 ):
     from pykeen.pipeline import pipeline
     from pykeen.triples import TriplesFactory
@@ -83,7 +84,7 @@ def train(
 
     if model_lower == "transe":
         loss            = "NSSALoss"
-        loss_kwargs     = dict(margin=9.0, adversarial_temperature=1.0)
+        loss_kwargs     = dict(margin=margin, adversarial_temperature=1.0)
         model_kwargs    = dict(embedding_dim=dim, scoring_fct_norm=1)
         training_loop   = "sLCWA"
         transe_num_negs = cfg.NEG_PER_POS
@@ -245,14 +246,14 @@ def _save_comparison_table(results: dict) -> None:
 # Punto de entrada
 # ---------------------------------------------------------------------------
 
-def run(model_name=None, epochs=None, dim=None, device=None, all_models=False):
+def run(model_name=None, epochs=None, dim=None, device=None, all_models=False, margin=9.0):
     epochs = epochs or cfg.N_EPOCHS
     dim    = dim    or cfg.EMBEDDING_DIM
     device = device or cfg.DEVICE
     if all_models:
         train_all_models(epochs=epochs, dim=dim, device=device)
     else:
-        train(model_name=model_name or 'DistMult', epochs=epochs, dim=dim, device=device)
+        train(model_name=model_name or 'DistMult', epochs=epochs, dim=dim, device=device, margin=margin)
 
 
 if __name__ == "__main__":
@@ -264,6 +265,8 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=cfg.N_EPOCHS)
     parser.add_argument("--dim",    type=int, default=cfg.EMBEDDING_DIM)
     parser.add_argument("--device", default=cfg.DEVICE, choices=["cpu", "cuda"])
+    parser.add_argument("--margin", type=float, default=9.0,
+                        help="Margin para NSSALoss (solo TransE). Prueba 6, 12, 24.")
     args = parser.parse_args()
     run(
         model_name=args.model,
@@ -271,4 +274,5 @@ if __name__ == "__main__":
         dim=args.dim,
         device=args.device,
         all_models=args.all_models,
+        margin=args.margin,
     )
