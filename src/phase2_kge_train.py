@@ -83,12 +83,12 @@ def train(
 
     if model_lower == "transe":
         loss            = "MarginRankingLoss"
-        loss_kwargs     = dict(margin=1.0)
-        model_kwargs    = dict(embedding_dim=dim, scoring_fct_norm=2)
+        loss_kwargs     = dict(margin=9.0)
+        model_kwargs    = dict(embedding_dim=dim, scoring_fct_norm=1)
         training_loop   = "sLCWA"
-        transe_num_negs = 256
-        transe_sampler  = "bernoulli"
-        train_batch     = 1024
+        transe_num_negs = cfg.NEG_PER_POS
+        transe_sampler  = "basic"
+        train_batch     = batch
         train_slice     = None
     else:
         loss            = "BCEWithLogitsLoss"

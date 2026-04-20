@@ -104,11 +104,11 @@ ENTITY_EVAL_PAIRS = [
 # Hiperparámetros KGE (DistMult)
 # ---------------------------------------------------------------------------
 
-EMBEDDING_DIM  = 512
+EMBEDDING_DIM  = 256
 N_EPOCHS       = 600
 BATCH_SIZE     = 2048
-LEARNING_RATE  = 5e-4
-NEG_PER_POS    = 10       # 10 es conservador (50 para GPUs con +40GB)
+LEARNING_RATE  = 1e-3
+NEG_PER_POS    = 50       # 50 default A100, 10 fallback CPU
 RANDOM_SEED    = 42
 
 TRAIN_RATIO    = 0.80
