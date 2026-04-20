@@ -132,15 +132,6 @@ def train(
     pipeline_kwargs["negative_sampler"]        = transe_sampler
     pipeline_kwargs["negative_sampler_kwargs"] = dict(num_negs_per_pos=transe_num_negs)
 
-    if model_lower == "transe":
-        pipeline_kwargs["stopper"] = "early"
-        pipeline_kwargs["stopper_kwargs"] = dict(
-            frequency=25,
-            patience=4,
-            relative_delta=0.002,
-            metric="both.realistic.inverse_harmonic_mean_rank",
-        )
-
     result = pipeline(**pipeline_kwargs)
     print(f"\n[3/3] Guardando modelo y embeddings ...")
     out_model_dir = cfg.model_dir(model_name)
