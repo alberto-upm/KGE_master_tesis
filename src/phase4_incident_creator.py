@@ -453,7 +453,8 @@ class IncidentCreatorSession:
                     conf = rule_hit["confidence"]
                     print(f"\n[REGLA {rid}] Sugerencia para '{label}': {val}"
                           f"  (confianza: {conf:.4f})")
-                    print("  s/si/Enter = aceptar  |  valor propio  |  skip  |  exit")
+                    print("  s/si/Enter = aceptar  |  n/no = rechazar (ver KGE+CBR)"
+                          "  |  valor propio  |  skip  |  exit")
                     try:
                         user_input = input("> ").strip()
                     except (EOFError, KeyboardInterrupt):
@@ -464,6 +465,18 @@ class IncidentCreatorSession:
                         break
                     if cmd in ("saltar", "skip"):
                         prop_idx += 1; recs = []; continue
+                    if cmd in ("n", "no"):
+                        # Rechazar la regla → calcular KGE+CBR y continuar
+                        print("  [Regla rechazada. Calculando recomendaciones KGE+CBR ...]")
+                        recs, n_proxies = recommend_property(
+                            known_props=incident,
+                            target_prop=prop,
+                            incidents_map=self.incidents_map,
+                            model=self.model,
+                            factory=self.factory,
+                            top_k=self.top_k,
+                        )
+                        continue
                     if cmd in ("s", "si", "y", "yes", ""):
                         incident[prop] = val
                         sources[prop]  = rule_hit
