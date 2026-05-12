@@ -157,7 +157,7 @@ def recommend_property(
     rrf_k: float = cfg.RRF_K,
     w_kge: float = cfg.W_KGE,
     w_cbr: float = cfg.W_CBR,
-) -> tuple[list[tuple[str, int, float]], int]:
+) -> tuple[list[tuple[str, int, float, float]], int]:
     """
     Genera recomendaciones para target_prop combinando CBR + KGE mediante
     Weighted Reciprocal Rank Fusion (WRRF).
@@ -170,7 +170,7 @@ def recommend_property(
        y fusiona: WRRF(o) = w_kge/(rrf_k + rank_kge) + w_cbr/(rrf_k + rank_cbr)
     4. Fallback si no hay proxies: predict_heads sobre la primera prop conocida
 
-    Devuelve (lista de (entity_label, frecuencia, score_medio), n_proxies)
+    Devuelve (lista de (entity_label, cbr_freq, kge_score, wrrf_score), n_proxies)
     ordenada por WRRF DESC.
     """
     from phase3_link_prediction import predict_tails, predict_heads
@@ -207,12 +207,15 @@ def recommend_property(
     rank_kge = {ent: i + 1 for i, (ent, _, _) in enumerate(by_kge)}
 
     # Weighted RRF: WRRF(o) = w_kge/(k + rank_kge) + w_cbr/(k + rank_cbr)
-    aggregated.sort(
-        key=lambda x: (w_kge / (rrf_k + rank_kge[x[0]])
-                     + w_cbr / (rrf_k + rank_cbr[x[0]])),
+    def _wrrf(ent):
+        return w_kge / (rrf_k + rank_kge[ent]) + w_cbr / (rrf_k + rank_cbr[ent])
+
+    result = sorted(
+        [(ent, freq, kge_score, _wrrf(ent)) for ent, freq, kge_score in aggregated],
+        key=lambda x: x[3],
         reverse=True,
     )
-    return aggregated[:top_k], n_proxies
+    return result[:top_k], n_proxies
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +337,7 @@ class IncidentCreatorSession:
                 f"- {s}" for s in verbalize_props("la nueva incidencia", filled)
             ) + "\n\n"
 
-        ids_line = ", ".join(ent for ent, _, _ in recs)
+        ids_line = ", ".join(ent for ent, *_ in recs)
         user_prompt = (
             f"{known_block}"
             f"Campo a completar: '{label}'.\n"
@@ -360,8 +363,8 @@ class IncidentCreatorSession:
         Devuelve el identificador o None si no está claro (LLM responde UNCLEAR).
         """
         options_text = "\n".join(
-            f"- {ent}  (frecuencia: {freq}, score: {score:.3f})"
-            for ent, freq, score in recs
+            f"- {ent}  (frecuencia: {freq}, score: {score:.3f}, WRRF: {wrrf:.5f})"
+            for ent, freq, score, wrrf in recs
         )
         messages = [
             {"role": "system", "content": _EXTRACT_SYSTEM_PROMPT},
@@ -383,7 +386,7 @@ class IncidentCreatorSession:
             return None
         # Validar que lo devuelto por el LLM es uno de los IDs del KGE.
         # Si el LLM se inventa algo, tratarlo como UNCLEAR.
-        known_ids = {ent for ent, _, _ in recs}
+        known_ids = {ent for ent, *_ in recs}
         return raw if raw in known_ids else None
 
     # ------------------------------------------------------------------
@@ -508,10 +511,11 @@ class IncidentCreatorSession:
                     last_question = f"¿Qué valor eliges para {label}?"
 
                 print(f"\n[Asistente] {last_question}\n")
-                print("Opciones recomendadas (KGE):")
-                for i, (ent, freq, score) in enumerate(recs, 1):
+                print("Opciones recomendadas (KGE+CBR):")
+                for i, (ent, freq, score, wrrf) in enumerate(recs, 1):
                     marker = "►" if i == 1 else " "
-                    print(f"  {marker}{i}. {ent}  (freq: {freq}, score: {score:.3f})")
+                    print(f"  {marker}{i}. {ent}  "
+                          f"(freq: {freq}, score: {score:.3f}, WRRF: {wrrf:.5f})")
                 print("(responde con número, ID exacto, s/si = #1, skip, exit)\n")
 
                 try:
@@ -527,11 +531,15 @@ class IncidentCreatorSession:
                 if chosen == "__skip__":
                     prop_idx += 1; recs = []; continue
 
-                known_ids = {ent for ent, _, _ in recs}
+                known_ids = {ent for ent, *_ in recs}
                 if chosen is not None and chosen in known_ids:
                     incident[prop] = chosen
+                    _r = next((r for r in recs if r[0] == chosen), None)
                     sources[prop] = {"value": chosen, "source": "KGE",
-                                     "n_proxies": n_proxies}
+                                     "n_proxies": n_proxies,
+                                     "cbr_freq": _r[1] if _r else None,
+                                     "kge_score": _r[2] if _r else None,
+                                     "wrrf": _r[3] if _r else None}
                     print(f"  ✓ {label} = {chosen}  [KGE]")
                     prop_idx += 1; recs = []
                     continue
@@ -555,8 +563,12 @@ class IncidentCreatorSession:
 
                 if extracted:
                     incident[prop] = extracted
+                    _r = next((r for r in recs if r[0] == extracted), None)
                     sources[prop] = {"value": extracted, "source": "KGE",
-                                     "n_proxies": n_proxies}
+                                     "n_proxies": n_proxies,
+                                     "cbr_freq": _r[1] if _r else None,
+                                     "kge_score": _r[2] if _r else None,
+                                     "wrrf": _r[3] if _r else None}
                     print(f"  ✓ {label} = {extracted}  [KGE]")
                     prop_idx += 1; recs = []
                 else:
@@ -575,9 +587,10 @@ class IncidentCreatorSession:
                 if n_proxies:
                     print(f"[CBR] {n_proxies} incidencias similares.")
                 if recs:
-                    for i, (ent, freq, score) in enumerate(recs):
+                    for i, (ent, freq, score, wrrf) in enumerate(recs):
                         marker = "►" if i == 0 else " "
-                        print(f"  {marker}{i+1}. {ent}  (score: {score:.4f}, freq: {freq})")
+                        print(f"  {marker}{i+1}. {ent}  "
+                              f"(freq: {freq}, score: {score:.3f}, WRRF: {wrrf:.5f})")
                 else:
                     print("[KGE] Sin recomendaciones. Escribe un valor manualmente.")
 
@@ -592,12 +605,15 @@ class IncidentCreatorSession:
                 elif chosen == "__skip__":
                     prop_idx += 1; recs = []
                 elif chosen is not None:
-                    known_ids = {ent for ent, _, _ in recs}
+                    known_ids = {ent for ent, *_ in recs}
                     if chosen in known_ids or not recs:
                         incident[prop] = chosen
                         src = "KGE" if (recs and chosen in known_ids) else "USUARIO"
+                        _r = next((r for r in recs if r[0] == chosen), None) if src == "KGE" else None
                         sources[prop] = {"value": chosen, "source": src,
-                                         "n_proxies": n_proxies}
+                                         "n_proxies": n_proxies,
+                                         **({"cbr_freq": _r[1], "kge_score": _r[2],
+                                             "wrrf": _r[3]} if _r else {})}
                         print(f"  ✓ {label} = {chosen}  [{src}]")
                         prop_idx += 1; recs = []
                     else:
@@ -672,8 +688,14 @@ class IncidentCreatorSession:
                 lbl  = _PROP_LABELS.get(p, p)
                 src  = info.get("source", "?")
                 val  = info.get("value", filled.get(p, "?"))
-                extra = (f"  [{info['rule_id']}  conf={info['confidence']:.4f}]"
-                         if src == "RULE" else "")
+                if src == "RULE":
+                    extra = f"  [{info['rule_id']}  conf={info['confidence']:.4f}]"
+                elif src == "KGE" and info.get("cbr_freq") is not None:
+                    extra = (f"  [freq={info['cbr_freq']}"
+                             f"  score={info['kge_score']:.3f}"
+                             f"  WRRF={info['wrrf']:.5f}]")
+                else:
+                    extra = ""
                 print(f"    · {lbl}: {val}  [{src}]{extra}")
 
         llm_summary = ""
