@@ -81,8 +81,8 @@ def predict_tails(
         )
         df = scored.df.head(top_k)
         return list(zip(df["tail_label"].tolist(), df["score"].tolist()))
-    except KeyError:
-        # Entidad o relación no conocida por la factory
+    except (KeyError, ValueError):
+        # Entidad o relación no conocida por la factory, o arrays de distinta longitud
         return []
 
 
@@ -110,7 +110,7 @@ def predict_heads(
         )
         df = scored.df.head(top_k)
         return list(zip(df["head_label"].tolist(), df["score"].tolist()))
-    except KeyError:
+    except (KeyError, ValueError):
         return []
 
 

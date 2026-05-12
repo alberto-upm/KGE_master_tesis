@@ -32,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
+from rule_engine import RuleEngine
 
 
 # ---------------------------------------------------------------------------
@@ -279,18 +280,24 @@ class IncidentCreatorSession:
         print(f"{'='*60}")
 
         # Mapa de incidencias históricas (desde TSV, sin rdflib)
-        print(f"  [1/3] Cargando incidencias desde TSV ...")
+        print(f"  [1/4] Cargando incidencias desde TSV ...")
         self.incidents_map = _build_incidents_map_from_tsv()
         print(f"        {len(self.incidents_map):,} incidencias históricas cargadas.")
 
+        # Motor de reglas Datalog
+        print(f"  [2/4] Cargando motor de reglas ...")
+        self.rule_engine = RuleEngine()
+        _rs = self.rule_engine.stats()
+        print(f"        {_rs['total_rules']:,} reglas cargadas ({_rs['predicates']} predicados).")
+
         # Modelo KGE
         from phase3_link_prediction import load_model_by_name
-        print(f"  [2/3] Cargando modelo KGE: {kge_model_name} ...")
+        print(f"  [3/4] Cargando modelo KGE: {kge_model_name} ...")
         self.model, self.factory = load_model_by_name(kge_model_name)
 
         # LLM (opcional)
         if use_llm:
-            print(f"  [3/3] Conectando con LLM: {llm_model_name} ...")
+            print(f"  [4/4] Conectando con LLM: {llm_model_name} ...")
             try:
                 from openai import OpenAI
                 from phase4_llm_inference import KGEAugmentedLLM
@@ -307,7 +314,7 @@ class IncidentCreatorSession:
                 self._openai_client = None
                 self.llm = None
         else:
-            print("  [3/3] Modo sin LLM (menú numerado).")
+            print("  [4/4] Modo sin LLM (menú numerado).")
 
         print(f"{'='*60}\n")
 
@@ -387,6 +394,9 @@ class IncidentCreatorSession:
     def run(self) -> dict:
         """Ejecuta la sesión. Devuelve el dict de la incidencia completada."""
         incident: dict[str, str | None] = {p: None for p in INCIDENT_PROPS}
+        # Trazabilidad: {prop → {"value", "source", ...}}
+        sources: dict[str, dict] = {}
+        self._sources = sources
 
         print("=== Creación de nueva incidencia ===\n")
 
@@ -405,8 +415,9 @@ class IncidentCreatorSession:
                 print()
                 for prop, val in pre_filled.items():
                     incident[prop] = val
+                    sources[prop] = {"value": val, "source": "USUARIO"}
                     label = _PROP_LABELS.get(prop, prop)
-                    print(f"  [Detectado] {label} = {val}")
+                    print(f"  [Detectado] {label} = {val}  [USUARIO]")
             else:
                 print("  (No se detectaron entidades conocidas en el texto)")
             print()
@@ -434,7 +445,38 @@ class IncidentCreatorSession:
                 recs = []
                 continue
 
-            # Calcular recomendaciones una sola vez por campo
+            # Capa 3 — Inferencia en cascada: REGLA → KGE+CBR
+            if not recs:
+                rule_hit = self.rule_engine.query(incident, prop)
+                if rule_hit:
+                    val  = rule_hit["value"]
+                    rid  = rule_hit["rule_id"]
+                    conf = rule_hit["confidence"]
+                    print(f"\n[REGLA {rid}] Sugerencia para '{label}': {val}"
+                          f"  (confianza: {conf:.4f})")
+                    print("  s/si/Enter = aceptar  |  valor propio  |  skip  |  exit")
+                    try:
+                        user_input = input("> ").strip()
+                    except (EOFError, KeyboardInterrupt):
+                        print("\n[Interrupción — guardando lo completado]")
+                        break
+                    cmd = user_input.lower()
+                    if cmd in ("salir", "exit", "quit"):
+                        break
+                    if cmd in ("saltar", "skip"):
+                        prop_idx += 1; recs = []; continue
+                    if cmd in ("s", "si", "y", "yes", ""):
+                        incident[prop] = val
+                        sources[prop]  = rule_hit
+                        print(f"  ✓ {label} = {val}  [REGLA]")
+                    else:
+                        incident[prop] = user_input
+                        sources[prop]  = {"value": user_input, "source": "USUARIO"}
+                        print(f"  ✓ {label} = {user_input}  [USUARIO]")
+                    prop_idx += 1; recs = []
+                    continue
+
+            # Sin regla aplicable → KGE+CBR (siempre devuelve algo)
             if not recs:
                 recs, n_proxies = recommend_property(
                     known_props=incident,
@@ -478,7 +520,9 @@ class IncidentCreatorSession:
                 known_ids = {ent for ent, _, _ in recs}
                 if chosen is not None and chosen in known_ids:
                     incident[prop] = chosen
-                    print(f"  ✓ {label} = {chosen}")
+                    sources[prop] = {"value": chosen, "source": "KGE",
+                                     "n_proxies": n_proxies}
+                    print(f"  ✓ {label} = {chosen}  [KGE]")
                     prop_idx += 1; recs = []
                     continue
 
@@ -492,7 +536,9 @@ class IncidentCreatorSession:
 
                 if extracted:
                     incident[prop] = extracted
-                    print(f"  ✓ {label} = {extracted}")
+                    sources[prop] = {"value": extracted, "source": "KGE",
+                                     "n_proxies": n_proxies}
+                    print(f"  ✓ {label} = {extracted}  [KGE]")
                     prop_idx += 1; recs = []
                 else:
                     # 3) UNCLEAR → re-preguntar (mantener recs, no avanzar prop_idx)
@@ -530,7 +576,10 @@ class IncidentCreatorSession:
                     known_ids = {ent for ent, _, _ in recs}
                     if chosen in known_ids or not recs:
                         incident[prop] = chosen
-                        print(f"  ✓ {label} = {chosen}")
+                        src = "KGE" if (recs and chosen in known_ids) else "USUARIO"
+                        sources[prop] = {"value": chosen, "source": src,
+                                         "n_proxies": n_proxies}
+                        print(f"  ✓ {label} = {chosen}  [{src}]")
                         prop_idx += 1; recs = []
                     else:
                         print(f"  [!] '{chosen}' no está entre las opciones válidas. "
@@ -597,6 +646,17 @@ class IncidentCreatorSession:
         for s in sentences:
             print(f"    · {s}")
 
+        _sources = getattr(self, "_sources", {})
+        if _sources:
+            print("\n  Trazabilidad:")
+            for p, info in _sources.items():
+                lbl  = _PROP_LABELS.get(p, p)
+                src  = info.get("source", "?")
+                val  = info.get("value", filled.get(p, "?"))
+                extra = (f"  [{info['rule_id']}  conf={info['confidence']:.4f}]"
+                         if src == "RULE" else "")
+                print(f"    · {lbl}: {val}  [{src}]{extra}")
+
         llm_summary = ""
         if self.llm and sentences:
             try:
@@ -616,6 +676,7 @@ class IncidentCreatorSession:
             "timestamp":   datetime.now().isoformat(timespec="seconds"),
             "kge_model":   self.kge_model_name,
             "incident":    incident,
+            "sources":     getattr(self, "_sources", {}),
             "llm_summary": llm_summary,
         }
         with open(out_path, "a", encoding="utf-8") as f:
