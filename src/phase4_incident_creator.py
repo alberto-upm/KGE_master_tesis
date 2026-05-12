@@ -514,8 +514,6 @@ class IncidentCreatorSession:
                 if chosen == "__skip__":
                     prop_idx += 1; recs = []; continue
 
-                # Si _pick_from_menu devolvió el input textual tal cual, y NO es un
-                # ID conocido, delegamos al LLM para interpretar la respuesta.
                 known_ids = {ent for ent, _, _ in recs}
                 if chosen is not None and chosen in known_ids:
                     incident[prop] = chosen
@@ -525,7 +523,16 @@ class IncidentCreatorSession:
                     prop_idx += 1; recs = []
                     continue
 
-                # 2) Intentar extracción LLM contra las opciones KGE
+                # Identificador directo (contiene '_'): company__X, supportGroup_X, …
+                # El usuario lo escribe explícitamente → aceptar sin pasar por LLM
+                if chosen and "_" in chosen:
+                    incident[prop] = chosen
+                    sources[prop] = {"value": chosen, "source": "USUARIO"}
+                    print(f"  ✓ {label} = {chosen}  [USUARIO]")
+                    prop_idx += 1; recs = []
+                    continue
+
+                # 2) Respuesta en lenguaje natural → extracción LLM contra las opciones KGE
                 extracted = None
                 if user_input:
                     try:
