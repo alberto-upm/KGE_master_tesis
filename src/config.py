@@ -129,6 +129,14 @@ DEFAULT_MODEL   = "meta-llama/Meta-Llama-3-8B-Instruct"
 MAX_NEW_TOKENS  = 128
 
 # ---------------------------------------------------------------------------
+# Weighted Reciprocal Rank Fusion (CBR + KGE)
+# ---------------------------------------------------------------------------
+
+RRF_K   = 60   # constante de suavizado (estándar IR)
+W_KGE   = 0.7  # peso del ranking KGE
+W_CBR   = 0.3  # peso del ranking CBR  (W_KGE + W_CBR debe sumar 1)
+
+# ---------------------------------------------------------------------------
 # Evaluación
 # ---------------------------------------------------------------------------
 
