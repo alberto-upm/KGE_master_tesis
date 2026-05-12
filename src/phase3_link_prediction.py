@@ -31,10 +31,16 @@ def load_model_by_name(model_name: str = 'DistMult'):
     """
     Carga un modelo KGE entrenado por nombre desde out/models/<model_name>/.
     Retorna (model, training_factory).
+
+    El factory se carga del directorio del modelo (guardado por PyKEEN durante
+    el entrenamiento), garantizando que entity_to_id coincide exactamente con
+    el vocabulario con el que se entrenó el modelo.
     """
+    import pickle
     from pykeen.triples import TriplesFactory
 
-    model_path = cfg.model_dir(model_name) / "trained_model.pkl"
+    model_dir = cfg.model_dir(model_name)
+    model_path = model_dir / "trained_model.pkl"
     if not model_path.exists():
         raise FileNotFoundError(
             f"Modelo no encontrado: {model_path}\n"
@@ -44,7 +50,21 @@ def load_model_by_name(model_name: str = 'DistMult'):
     model = torch.load(model_path, map_location="cpu", weights_only=False)
     model.eval()
 
-    training_factory = TriplesFactory.from_path(cfg.TRAIN_TSV)
+    # Intentar cargar el factory guardado durante el entrenamiento.
+    # PyKEEN lo guarda en training_triples_factory.pkl (o training.pkl).
+    factory_loaded = False
+    for fname in ("training_triples_factory.pkl", "training.pkl"):
+        fpath = model_dir / fname
+        if fpath.exists():
+            with open(fpath, "rb") as fh:
+                training_factory = pickle.load(fh)
+            factory_loaded = True
+            break
+
+    if not factory_loaded:
+        # Fallback: recrear desde TSV (puede haber mismatch de vocabulario)
+        training_factory = TriplesFactory.from_path(cfg.TRAIN_TSV)
+
     return model, training_factory
 
 
@@ -65,24 +85,34 @@ def predict_tails(
     top_k: int = cfg.TOP_K_PREDICT,
 ) -> list[tuple[str, float]]:
     """
-    Dado (head, relation, ?), devuelve las top_k entidades tail
-    más probables según DistMult.
+    Dado (head, relation, ?), devuelve las top_k entidades tail más probables.
 
-    Retorna: lista de (entity_label, score) ordenada de mayor a menor score.
+    Usa model.score_t directamente para evitar incompatibilidades de versión
+    entre el factory guardado en el modelo y el factory reconstruido desde TSV.
     """
-    from pykeen.predict import predict_target
-
     try:
-        scored = predict_target(
-            model=model,
-            head=head_label,
-            relation=relation_label,
-            triples_factory=training_factory,
-        )
-        df = scored.df.head(top_k)
-        return list(zip(df["tail_label"].tolist(), df["score"].tolist()))
-    except (KeyError, ValueError):
-        # Entidad o relación no conocida por la factory, o arrays de distinta longitud
+        ent2id = training_factory.entity_to_id
+        rel2id = training_factory.relation_to_id
+
+        head_id = ent2id.get(head_label)
+        rel_id  = rel2id.get(relation_label)
+        if head_id is None or rel_id is None:
+            return []
+
+        hr = torch.tensor([[head_id, rel_id]], dtype=torch.long)
+        with torch.no_grad():
+            scores = model.score_t(hr).squeeze(0).cpu()  # [num_entities]
+
+        n = min(top_k, scores.shape[0])
+        top_scores, top_ids = torch.topk(scores, n)
+
+        id_to_ent = {v: k for k, v in ent2id.items()}
+        return [
+            (id_to_ent[i.item()], s.item())
+            for i, s in zip(top_ids, top_scores)
+            if i.item() in id_to_ent
+        ]
+    except Exception:
         return []
 
 
@@ -94,23 +124,31 @@ def predict_heads(
     top_k: int = cfg.TOP_K_PREDICT,
 ) -> list[tuple[str, float]]:
     """
-    Dado (?, relation, tail), devuelve las top_k entidades head
-    más probables (útil para "¿qué técnico resuelve tipo X?").
-
-    Nota: DistMult es simétrico → score(h,r,t) == score(t,r,h).
+    Dado (?, relation, tail), devuelve las top_k entidades head más probables.
     """
-    from pykeen.predict import predict_target
-
     try:
-        scored = predict_target(
-            model=model,
-            relation=relation_label,
-            tail=tail_label,
-            triples_factory=training_factory,
-        )
-        df = scored.df.head(top_k)
-        return list(zip(df["head_label"].tolist(), df["score"].tolist()))
-    except (KeyError, ValueError):
+        ent2id = training_factory.entity_to_id
+        rel2id = training_factory.relation_to_id
+
+        tail_id = ent2id.get(tail_label)
+        rel_id  = rel2id.get(relation_label)
+        if tail_id is None or rel_id is None:
+            return []
+
+        rt = torch.tensor([[rel_id, tail_id]], dtype=torch.long)
+        with torch.no_grad():
+            scores = model.score_h(rt).squeeze(0).cpu()  # [num_entities]
+
+        n = min(top_k, scores.shape[0])
+        top_scores, top_ids = torch.topk(scores, n)
+
+        id_to_ent = {v: k for k, v in ent2id.items()}
+        return [
+            (id_to_ent[i.item()], s.item())
+            for i, s in zip(top_ids, top_scores)
+            if i.item() in id_to_ent
+        ]
+    except Exception:
         return []
 
 
