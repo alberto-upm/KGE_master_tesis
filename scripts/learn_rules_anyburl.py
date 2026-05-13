@@ -163,16 +163,59 @@ WORKER_THREADS = 4
 
 
 # ---------------------------------------------------------------------------
+# Paso 3b: Asegurar que Java está disponible
+# ---------------------------------------------------------------------------
+
+def ensure_java() -> str:
+    """
+    Devuelve la ruta al ejecutable java.
+    Si no está en PATH, intenta instalarlo con apt-get (entornos Debian/Ubuntu/Jupyter).
+    """
+    import shutil
+
+    java_path = shutil.which("java")
+    if java_path:
+        return java_path
+
+    print("  [!] 'java' no encontrado en PATH. Intentando instalar OpenJDK ...")
+    try:
+        subprocess.run(
+            ["apt-get", "install", "-y", "--no-install-recommends", "default-jre-headless"],
+            check=True,
+        )
+    except FileNotFoundError:
+        print("  [!] apt-get no disponible. Instala Java manualmente:")
+        print("      conda install -c conda-forge openjdk")
+        print("      o: apt-get install -y default-jre-headless")
+        sys.exit(1)
+    except subprocess.CalledProcessError as e:
+        print(f"  [!] Falló la instalación de Java (código {e.returncode}).")
+        sys.exit(1)
+
+    java_path = shutil.which("java")
+    if not java_path:
+        print("  [!] Java instalado pero no encontrado en PATH. Reinicia el entorno.")
+        sys.exit(1)
+
+    result = subprocess.run([java_path, "-version"], capture_output=True, text=True)
+    version_line = (result.stdout or result.stderr).split("\n")[0]
+    print(f"        Java listo: {version_line}")
+    return java_path
+
+
+# ---------------------------------------------------------------------------
 # Paso 4: Ejecutar AnyBURL
 # ---------------------------------------------------------------------------
 
 def run_anyburl(jar_path: Path, config_path: Path) -> None:
+    java = ensure_java()
+
     print(f"[4/4] Ejecutando AnyBURL (tiempo máx: {LEARNING_TIME}s) ...")
     print(f"      Snapshots intermedios en: 10s, 50s, 100s, 500s, {LEARNING_TIME}s")
     print(f"      Puedes interrumpir con Ctrl+C — los snapshots ya generados se conservan.\n")
 
     cmd = [
-        "java", "-Xmx4G", "-cp", str(jar_path),
+        java, "-Xmx4G", "-cp", str(jar_path),
         "de.unima.ki.anyburl.Learn",
         str(config_path),
     ]
