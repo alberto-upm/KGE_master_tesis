@@ -32,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
-from rule_engine import RuleEngine
+from rule_engine_pyclause import RuleEnginePyClause as RuleEngine
 
 
 # ---------------------------------------------------------------------------
