@@ -54,10 +54,10 @@ def parse_blocks(n3_path: Path) -> tuple[str, dict[str, list[str]]]:
     cuando aparece el siguiente bloque o una línea vacía.
 
     Devuelve:
-      prefix_line : la línea '@prefix ...' del fichero
+      prefix_line : todas las líneas '@prefix ...' del fichero (concatenadas)
       blocks      : {entity_id_sin_prefijo: [líneas_del_bloque]}
     """
-    prefix_line = ""
+    prefix_lines: list[str] = []
     blocks: dict[str, list[str]] = {}
     current_id: str | None = None
     current_lines: list[str] = []
@@ -72,7 +72,8 @@ def parse_blocks(n3_path: Path) -> tuple[str, dict[str, list[str]]]:
             stripped = line.strip()
 
             if stripped.startswith("@prefix"):
-                prefix_line = line
+                if line not in prefix_lines:
+                    prefix_lines.append(line)
                 continue
 
             if not stripped:
@@ -92,7 +93,7 @@ def parse_blocks(n3_path: Path) -> tuple[str, dict[str, list[str]]]:
                     current_lines.append(line)
 
     _flush()  # último bloque
-    return prefix_line, blocks
+    return "\n".join(prefix_lines), blocks
 
 
 # ---------------------------------------------------------------------------
