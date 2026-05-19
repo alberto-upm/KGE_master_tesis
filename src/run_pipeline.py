@@ -11,9 +11,14 @@ Uso:
   python src/run_pipeline.py --phase 0                # preprocesado N3 → train_full.n3 + test_eval.n3 (split 95/5)
   python src/run_pipeline.py --phase 1                # parseo TTL → TSV (split por incidencias)
   python src/run_pipeline.py --phase 1b               # generación corpus Q&A + LP eval
-  python src/run_pipeline.py --phase 2                # entrenamiento DistMult (por defecto)
-  python src/run_pipeline.py --phase 2 --kge-model TransE
-  python src/run_pipeline.py --phase 2 --all-models   # entrena TransE+DistMult+ComplEx
+  python src/run_pipeline.py --phase 2                         # entrenamiento DistMult (por defecto)
+  python src/run_pipeline.py --phase 2 --kge-model TransE      # traslacional, línea base
+  python src/run_pipeline.py --phase 2 --kge-model RotatE      # rotaciones complejas, bueno para jerarquías
+  python src/run_pipeline.py --phase 2 --kge-model TransH      # hiperplanos por relación, jerarquías
+  python src/run_pipeline.py --phase 2 --kge-model HAKE        # coordenadas polares, jerarquías
+  python src/run_pipeline.py --phase 2 --kge-model DistMult    # bilineal simétrico
+  python src/run_pipeline.py --phase 2 --kge-model ComplEx     # bilineal asimétrico
+  python src/run_pipeline.py --phase 2 --all-models            # entrena todos los modelos secuencialmente
   python src/run_pipeline.py --phase 3                # link prediction (DistMult)
   python src/run_pipeline.py --phase 3 --kge-model ComplEx
   python src/run_pipeline.py --phase 5                # (sin ejecución standalone)

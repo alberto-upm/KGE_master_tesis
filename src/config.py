@@ -47,7 +47,7 @@ EVAL_RESULTS_FILE   = EVAL_DIR / "results.json"
 # Multi-model KGE
 # ---------------------------------------------------------------------------
 
-KGE_MODELS = ['TransE', 'DistMult', 'ComplEx']
+KGE_MODELS = ['TransE', 'RotatE', 'TransH', 'HAKE', 'DistMult', 'ComplEx']
 
 
 def model_dir(model_name: str) -> Path:

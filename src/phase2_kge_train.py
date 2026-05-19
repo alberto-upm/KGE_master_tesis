@@ -1,22 +1,28 @@
 """
 Fase 2 — Entrenamiento de modelos KGE con PyKEEN.
 
-Modelos soportados: TransE, DistMult, ComplEx (y cualquier otro de PyKEEN).
+Modelos soportados:
+  Traslacionales (buenos para jerarquías):
+    TransE  — línea base traslacional
+    RotatE  — rotaciones en espacio complejo, captura transitividad y asimetría
+    TransH  — proyección en hiperplanos por relación
+    HAKE    — coordenadas polares, diseñado específicamente para jerarquías
+  Bilineales:
+    DistMult — producto escalar, simétrico
+    ComplEx  — espacio complejo, modela asimetría
 
 Requisito previo: ejecutar phase1_triples.py para generar los TSV.
 
-Salida por modelo (ej. DistMult):
-  out/models/distmult/           (modelo PyKEEN completo)
-  out/embeddings/distmult/entity_embeddings.pt
-  out/embeddings/distmult/relation_embeddings.pt
-  out/embeddings/distmult/entity_to_id.json
-  out/embeddings/distmult/relation_to_id.json
+Salida por modelo (ej. RotatE):
+  out/models/rotate/           (modelo PyKEEN completo)
+  out/embeddings/rotate/entity_embeddings.pt
+  out/embeddings/rotate/relation_embeddings.pt
 
 Uso:
   python src/phase2_kge_train.py                        # DistMult (por defecto)
-  python src/phase2_kge_train.py --model TransE
-  python src/phase2_kge_train.py --model ComplEx
-  python src/phase2_kge_train.py --all-models           # entrena los 3 secuencialmente
+  python src/phase2_kge_train.py --model RotatE
+  python src/phase2_kge_train.py --model HAKE
+  python src/phase2_kge_train.py --all-models           # entrena todos secuencialmente
   python src/phase2_kge_train.py --epochs N --dim D --device cpu|cuda
 """
 
@@ -36,6 +42,46 @@ import config as cfg
 # Entrenamiento de un modelo
 # ---------------------------------------------------------------------------
 
+def _model_config(model_lower: str, dim: int, margin: float) -> dict:
+    """
+    Devuelve la configuración de loss, sampler y model_kwargs para cada modelo.
+
+    Modelos traslacionales/rotacionales: NSSALoss + bernoulli.
+      - Capturan asimetría y transitividad; clave para relaciones jerárquicas.
+      - bernoulli pondera negativos según frecuencia de cabeza/cola (Bernoulli trick).
+    Modelos bilineales: BCEWithLogitsLoss + basic.
+      - DistMult/ComplEx funcionan mejor con BCE y muestreo uniforme.
+    HAKE: NSSALoss + basic (modular + fase; bernoulli añade ruido en el módulo).
+    """
+    nssa = dict(loss="NSSALoss",
+                loss_kwargs=dict(margin=margin, adversarial_temperature=1.0),
+                sampler="bernoulli",
+                eval_batch_size=32)
+    bce  = dict(loss="BCEWithLogitsLoss",
+                loss_kwargs={},
+                sampler="basic",
+                eval_batch_size=32)
+
+    configs = {
+        "transe":   {**nssa, "model_kwargs": dict(embedding_dim=dim, scoring_fct_norm=1)},
+        # RotatE: embeddings complejos internamente; dim es la dimensión total real
+        "rotate":   {**nssa, "model_kwargs": dict(embedding_dim=dim)},
+        # TransH: proyecta entidades en hiperplanos específicos por relación
+        "transh":   {**nssa, "model_kwargs": dict(embedding_dim=dim)},
+        # HAKE: módulo captura nivel jerárquico, fase captura diferencia semántica
+        "hake":     {**nssa, "model_kwargs": dict(embedding_dim=dim),
+                     "sampler": "basic"},
+        "distmult": {**bce,  "model_kwargs": dict(embedding_dim=dim)},
+        # ComplEx: embeddings complejos (dim × 2 en RAM) → eval_batch más pequeño
+        "complex":  {**bce,  "model_kwargs": dict(embedding_dim=dim),
+                     "eval_batch_size": 8},
+    }
+    if model_lower not in configs:
+        # Fallback genérico para cualquier otro modelo de PyKEEN
+        return {**bce, "model_kwargs": dict(embedding_dim=dim)}
+    return configs[model_lower]
+
+
 def train(
     model_name:      str   = 'DistMult',
     epochs:          int   = cfg.N_EPOCHS,
@@ -53,7 +99,6 @@ def train(
     print(f"FASE 2 — Entrenamiento {model_name} con PyKEEN")
     print("=" * 60)
 
-    # Verificar que existen los TSV
     if not cfg.TRAIN_TSV.exists():
         raise FileNotFoundError(
             f"No encontrado: {cfg.TRAIN_TSV}\n"
@@ -61,12 +106,9 @@ def train(
         )
 
     print(f"[1/3] Cargando tripletas desde {cfg.TRAIN_TSV} ...")
-    # Cargar TODAS las tripletas del train.tsv (que contiene todo el grafo)
-    # PyKEEN hará el split internamente, garantizando cobertura de vocabulario
     full = TriplesFactory.from_path(cfg.TRAIN_TSV)
     print(f"      Total de tripletas cargadas: {full.num_triples:,}")
 
-    # Split con garantía de PyKEEN: todas las entidades de valid/test están en train
     training, validation, testing = full.split(
         ratios=[cfg.TRAIN_RATIO, cfg.VALID_RATIO, 1.0 - cfg.TRAIN_RATIO - cfg.VALID_RATIO],
         random_state=cfg.RANDOM_SEED,
@@ -76,41 +118,20 @@ def train(
     print(f"      Train / Valid / Test: "
           f"{training.num_triples:,} / {validation.num_triples:,} / {testing.num_triples:,}")
 
-    # Configuración por modelo:
-    # - TransE:   MarginRankingLoss + sLCWA + norm L2 + bernoulli (más negativos)
-    # - DistMult: BCEWithLogitsLoss + sLCWA            (bilineal, funciona bien con BCE)
-    # - ComplEx:  BCEWithLogitsLoss + sLCWA            (igual que DistMult)
     model_lower = model_name.lower()
+    mcfg = _model_config(model_lower, dim, margin)
 
-    if model_lower == "transe":
-        loss            = "NSSALoss"
-        loss_kwargs     = dict(margin=margin, adversarial_temperature=1.0)
-        model_kwargs    = dict(embedding_dim=dim, scoring_fct_norm=1)
-        training_loop   = "sLCWA"
-        transe_num_negs = cfg.NEG_PER_POS
-        transe_sampler  = "bernoulli"
-        train_batch     = batch
-        train_slice     = None
-    else:
-        loss            = "BCEWithLogitsLoss"
-        loss_kwargs     = {}
-        model_kwargs    = dict(embedding_dim=dim)
-        training_loop   = "sLCWA"
-        transe_num_negs = cfg.NEG_PER_POS
-        transe_sampler  = "basic"
-        train_batch     = batch
-        train_slice     = None
-
-    # ComplEx usa embeddings complejos (dim real × 2) → necesita menos RAM en evaluación
+    loss          = mcfg["loss"]
+    loss_kwargs   = mcfg["loss_kwargs"]
+    model_kwargs  = mcfg["model_kwargs"]
+    sampler       = mcfg["sampler"]
     if eval_batch_size is None:
-        eval_batch_size = 8 if model_lower == "complex" else 32
+        eval_batch_size = mcfg["eval_batch_size"]
 
     print(f"\n[2/3] Entrenando {model_name}  "
           f"(dim={dim}, epochs={epochs}, loss={loss}, "
-          f"loop={training_loop}, device={device}, eval_batch={eval_batch_size}) ...")
+          f"sampler={sampler}, device={device}, eval_batch={eval_batch_size}) ...")
 
-    # Construir kwargs de pipeline dinámicamente
-    # LCWA no permite negative_sampler, mientras que sLCWA sí
     pipeline_kwargs = dict(
         training=training,
         validation=validation,
@@ -119,28 +140,20 @@ def train(
         model_kwargs=model_kwargs,
         optimizer="Adam",
         optimizer_kwargs=dict(lr=lr),
-        training_loop=training_loop,
+        training_loop="sLCWA",
         training_loop_kwargs=dict(automatic_memory_optimization=False),
-        training_kwargs={k: v for k, v in dict(
-            num_epochs=epochs,
-            batch_size=train_batch,
-            sub_batch_size=train_batch,
-            slice_size=train_slice,
-        ).items() if v is not None},
+        training_kwargs=dict(num_epochs=epochs, batch_size=batch, sub_batch_size=batch),
         loss=loss,
         loss_kwargs=loss_kwargs if loss_kwargs else None,
+        negative_sampler=sampler,
+        negative_sampler_kwargs=dict(num_negs_per_pos=cfg.NEG_PER_POS),
         evaluator="RankBasedEvaluator",
         evaluator_kwargs=dict(filtered=True),
-        # Entrenamiento en GPU, evaluación en CPU para evitar OOM de GPU.
-        # ComplEx usa batch pequeño para evitar OOM de RAM (embeddings doble tamaño).
+        # Evaluación siempre en CPU para evitar OOM en GPU
         evaluation_kwargs=dict(batch_size=eval_batch_size, device="cpu"),
         random_seed=cfg.RANDOM_SEED,
         device=device,
     )
-
-    if training_loop != "LCWA":
-        pipeline_kwargs["negative_sampler"]        = transe_sampler
-        pipeline_kwargs["negative_sampler_kwargs"] = dict(num_negs_per_pos=transe_num_negs)
 
     result = pipeline(**pipeline_kwargs)
     print(f"\n[3/3] Guardando modelo y embeddings ...")
@@ -259,7 +272,7 @@ def run(model_name=None, epochs=None, dim=None, device=None, all_models=False, m
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Entrenar modelos KGE con PyKEEN")
     parser.add_argument("--model",      default="DistMult",
-                        help="Modelo KGE a entrenar (default: DistMult)")
+                        help=f"Modelo KGE a entrenar. Opciones: {cfg.KGE_MODELS} (default: DistMult)")
     parser.add_argument("--all-models", action="store_true",
                         help=f"Entrenar todos los modelos: {cfg.KGE_MODELS}")
     parser.add_argument("--epochs", type=int, default=cfg.N_EPOCHS)
