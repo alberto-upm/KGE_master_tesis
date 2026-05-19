@@ -1,12 +1,12 @@
 """
-Aprende reglas sobre incident_triplets.n3 usando AnyBURL.
+Aprende reglas sobre incident_triplets.ttl usando AnyBURL.
 
 Criterios duros:
   - THRESHOLD_CORRECT_PREDICTIONS = 10   (mínimo 10 instancias)
   - THRESHOLD_CONFIDENCE = 0.75          (confianza >= 75%)
 
 Pasos:
-  1. Convierte incident_triplets.n3 → triples.tsv (formato AnyBURL: suj pred obj)
+  1. Convierte incident_triplets.ttl → triples.tsv (formato AnyBURL: suj pred obj)
   2. Descarga AnyBURL-23-1x.jar si no existe
   3. Escribe config-learn.properties con los umbrales pedidos
   4. Ejecuta AnyBURL y guarda reglas en data/reglas/
@@ -23,7 +23,7 @@ DATA_DIR   = BASE_DIR / "data"
 RULES_DIR  = DATA_DIR / "reglas"
 SCRIPTS_DIR = BASE_DIR / "scripts"
 
-N3_FILE    = DATA_DIR / "incident_triplets.n3"
+INPUT_FILE    = DATA_DIR / "incident_triplets.ttl"
 TSV_FILE   = DATA_DIR / "anyburl_triples.tsv"
 JAR_FILE   = BASE_DIR / "AnyBURL-23-1x.jar"
 CONFIG_FILE = SCRIPTS_DIR / "config-learn.properties"
@@ -142,9 +142,9 @@ THRESHOLD_CORRECT_PREDICTIONS = 10
 # Confianza mínima 0.75
 THRESHOLD_CONFIDENCE = 0.75
 
-# --- Tiempo de aprendizaje ---
-# Genera snapshots en: 10s, 50s, 100s, 500s, {LEARNING_TIME}s
-SNAPSHOTS_AT = 10 50 100 500 {LEARNING_TIME}
+# --- Solo generar el snapshot final ---
+# AnyBURL escribirá únicamente rules-1000 (sin intermedios rules-10, rules-100, ...)
+SNAPSHOTS_AT = {LEARNING_TIME}
 
 # --- Longitud máxima de reglas ---
 MAX_LENGTH_CYCLIC          = 3
@@ -197,18 +197,22 @@ def run_anyburl(jar_path: Path, config_path: Path) -> None:
     print(f"      Snapshots intermedios en: 10s, 50s, 100s, 500s, {LEARNING_TIME}s")
     print(f"      Puedes interrumpir con Ctrl+C — los snapshots ya generados se conservan.\n")
 
+    target = RULES_DIR / f"rules-{LEARNING_TIME}"
     cmd = [
         java, "-Xmx4G", "-cp", str(jar_path),
         "de.unima.ki.anyburl.Learn",
         str(config_path),
     ]
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd)
     except KeyboardInterrupt:
-        print("\n[!] Interrumpido por el usuario. Los snapshots ya generados son válidos.")
-    except subprocess.CalledProcessError as e:
-        print(f"[!] AnyBURL terminó con error (código {e.returncode}).")
-        sys.exit(1)
+        print("\n[!] Interrumpido por el usuario.")
+
+    if target.exists():
+        n = sum(1 for _ in open(target))
+        print(f"  ✓ {target.name}: {n:,} reglas con soporte≥10 y confianza≥0.75")
+    else:
+        print(f"  [!] No se generó {target.name}.")
 
 
 # ---------------------------------------------------------------------------
@@ -223,11 +227,11 @@ if __name__ == "__main__":
     print(f"  Tiempo máx.    : {LEARNING_TIME}s")
     print(f"{'='*60}\n")
 
-    if not N3_FILE.exists():
-        print(f"[!] No se encontró {N3_FILE}")
+    if not INPUT_FILE.exists():
+        print(f"[!] No se encontró {INPUT_FILE}")
         sys.exit(1)
 
-    n3_to_tsv(N3_FILE, TSV_FILE)
+    n3_to_tsv(INPUT_FILE, TSV_FILE)
     download_jar(JAR_FILE)
     write_config(CONFIG_FILE, TSV_FILE, RULES_DIR)
     run_anyburl(JAR_FILE, CONFIG_FILE)

@@ -8,7 +8,9 @@ Uso:
   python src/run_pipeline.py --phase all
 
   # Solo una fase
+  python src/run_pipeline.py --phase 0                # preprocesado N3 → train_full.n3 + test_eval.n3 (split 95/5)
   python src/run_pipeline.py --phase 1                # parseo TTL → TSV (split por incidencias)
+  python src/run_pipeline.py --phase 1b               # generación corpus Q&A + LP eval
   python src/run_pipeline.py --phase 2                # entrenamiento DistMult (por defecto)
   python src/run_pipeline.py --phase 2 --kge-model TransE
   python src/run_pipeline.py --phase 2 --all-models   # entrena TransE+DistMult+ComplEx
@@ -35,7 +37,8 @@ Uso:
   python src/run_pipeline.py --phase 2 --epochs 50 --dim 64 --device cpu
 
 Dependencias entre fases:
-  Phase 1 → Phase 2 → Phase 3
+  Phase 0 → (genera train_full.n3 y test_eval.n3 desde incident_triplets.ttl)
+  Phase 1 → Phase 1b → Phase 2 → Phase 3
                    → create_incident (CBR + KGE + LLM)
                    → Phase 6 (evaluación del incident creator)
                    → compare (requiere phase 2 para todos los modelos)
@@ -106,9 +109,24 @@ def _stop_logging(tee: "_Tee | None"):
 # Ejecución de fases
 # ---------------------------------------------------------------------------
 
-def run_phase1():
+def run_phase0(test_ratio=None, seed=None):
+    from phase0_preprocess import run
+    kwargs = {}
+    if test_ratio is not None:
+        kwargs["test_ratio"] = test_ratio
+    if seed is not None:
+        kwargs["seed"] = seed
+    run(**kwargs)
+
+
+def run_phase1(no_split: bool = False):
     from phase1_triples import run
-    run()
+    run(no_split=no_split)
+
+
+def run_phase1b():
+    from phase1b_generate_corpus import main
+    main()
 
 
 def run_phase2(epochs=None, dim=None, device=cfg.DEVICE, kge_model=None, all_models=False):
@@ -176,10 +194,14 @@ def main():
     parser.add_argument(
         "--phase",
         default="all",
-        choices=["all", "1", "2", "3", "5", "6",
+        choices=["all", "0", "1", "1b", "2", "3", "5", "6",
                  "compare", "create_incident"],
         help="Fase a ejecutar (default: all)",
     )
+    parser.add_argument("--test-ratio", type=float, default=None,
+                        help="Fracción de incidencias para test (default: 0.05, solo phase 0)")
+    parser.add_argument("--no-split", action="store_true",
+                        help="Phase 1: usa train_full.n3 y vuelca todo en train.tsv (sin split)")
     # Opciones Phase 2 — entrenamiento KGE
     parser.add_argument("--epochs", type=int, default=None,
                         help=f"Épocas de entrenamiento (default: {cfg.N_EPOCHS})")
@@ -220,13 +242,17 @@ def main():
     print(f"{'='*60}\n")
 
     phases_to_run = (
-        ["1", "2", "3", "create_incident", "6"] if phase == "all" else [phase]
+        ["1", "1b", "2", "3", "create_incident", "6"] if phase == "all" else [phase]
     )
 
     for p in phases_to_run:
         t0 = time.time()
-        if p == "1":
-            run_phase1()
+        if p == "0":
+            run_phase0(test_ratio=args.test_ratio)
+        elif p == "1":
+            run_phase1(no_split=args.no_split)
+        elif p == "1b":
+            run_phase1b()
         elif p == "2":
             run_phase2(
                 epochs=args.epochs, dim=args.dim, device=args.device,

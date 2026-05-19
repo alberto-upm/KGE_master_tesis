@@ -75,7 +75,15 @@ secrets.json
 credentials.json
 
 # =========================
+# ⚙️ AnyBURL
+# =========================
+AnyBURL-*.jar
+de/
+
+# =========================
 # 📂 Otros
 # =========================
 *.tmp
 *.bak
+latex/
+Ejemplo_exportacion_V2.md

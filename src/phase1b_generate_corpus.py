@@ -22,7 +22,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
 
-from rdflib import Graph, Namespace, RDF, URIRef
+from rdflib import Graph, RDF, URIRef
 
 # ---------------------------------------------------------------------------
 # Configuración
@@ -35,10 +35,9 @@ N_MULTIHOP_MAX = 300     # Cuántas preguntas multi-hop generar como máximo
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 TTL_FILE = DATA_DIR / "filtrado.ttl"
+INPUT_FILE  = DATA_DIR / "incident_triplets.ttl"
 CORPUS_DIR = DATA_DIR / "corpus"
 CORPUS_DIR.mkdir(parents=True, exist_ok=True)
-
-REPCON = Namespace("http://repcon.org/schema#")
 
 random.seed(RANDOM_SEED)
 
@@ -46,10 +45,11 @@ random.seed(RANDOM_SEED)
 # 1. PARSEO DEL GRAFO
 # ---------------------------------------------------------------------------
 
-def load_graph(ttl_path: Path) -> Graph:
-    print(f"Cargando grafo desde {ttl_path} ...")
+def load_graph(path: Path) -> Graph:
+    print(f"Cargando grafo desde {path} ...")
     g = Graph()
-    g.parse(str(ttl_path), format="turtle")
+    fmt = "n3" if str(path).endswith(".n3") else "turtle"
+    g.parse(str(path), format=fmt)
     print(f"      {len(g)} tripletas cargadas.")
     return g
 
@@ -67,20 +67,31 @@ def build_incident_map(g: Graph) -> dict:
     """
     Devuelve un dict:
         incident_label → {predicate_local: [object_label, ...], ...}
-    Sólo incluye instancias de tipo repcon:incident.
+
+    Compatible con filtrado.ttl (rdf:type repcon:incident) y con
+    incident_triplets.ttl (repcon:type repcon:incident).
+    La detección es por etiqueta local, independiente del namespace.
     """
     print("Construyendo mapa de incidencias ...")
+
+    # Identificar todos los sujetos cuyo predicado local "type" apunta a "incident"
+    incident_subjects = set()
+    for s, p, o in g:
+        if extract_label(p) == "type" and extract_label(o) == "incident":
+            incident_subjects.add(s)
+
     incidents = {}
-    for subj in g.subjects(RDF.type, REPCON.incident):
+    for subj in incident_subjects:
         label = extract_label(subj)
         props = defaultdict(list)
         for pred, obj in g.predicate_objects(subj):
             pred_local = extract_label(pred)
-            if pred_local == "type":          # rdf:type ya lo usamos para filtrar
+            if pred_local == "type":
                 continue
             obj_label = extract_label(obj)
             props[pred_local].append(obj_label)
         incidents[label] = dict(props)
+
     print(f"      {len(incidents)} incidencias encontradas.")
     return incidents
 
@@ -936,9 +947,14 @@ def generate_entity_to_entity_eval_corpus(out_path=None) -> list[dict]:
 # MAIN
 # ---------------------------------------------------------------------------
 
-def main():
+def main(input_file: Path = None):
+    # Seleccionar fichero de entrada: argumento > N3 > TTL
+    if input_file is None:
+        input_file = INPUT_FILE if INPUT_FILE.exists() else TTL_FILE
+    print(f"[Corpus] Fuente: {input_file.name}")
+
     # 1. Cargar grafo
-    g = load_graph(TTL_FILE)
+    g = load_graph(input_file)
 
     # 2. Extraer mapa de incidencias
     incidents = build_incident_map(g)
@@ -1000,6 +1016,8 @@ def main():
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Generación de corpus sintético Q&A y LP eval")
+    parser.add_argument("--file", type=Path, default=None,
+                        help="Fichero de entrada (.ttl o .n3). Por defecto: incident_triplets.ttl si existe, si no filtrado.ttl")
     parser.add_argument("--lp-only", action="store_true",
                         help="Generar solo link_prediction_eval.json (rápido, sin Q&A)")
     parser.add_argument("--entity", action="store_true",
@@ -1015,4 +1033,4 @@ if __name__ == "__main__":
         generate_entity_to_entity_eval_corpus()
         print(f"\n✓ Completado. Fichero en: {cfg.ENTITY_EVAL_CORPUS}")
     else:
-        main()
+        main(input_file=args.file)

@@ -1,33 +1,42 @@
 """
 Fase 1 — Parseo del grafo RDF a tripletas TSV para PyKEEN.
 
-Split por incidencias: se dividen los IDs de incidencias (80/10/10)
-y todas las tripletas de cada incidencia van al mismo split.
-Tripletas cuyo head no es una incidencia van a train (entidades auxiliares).
+Modo normal (filtrado.ttl):
+  Divide las incidencias en 80/10/10 y genera train/valid/test.tsv.
 
-Salida:
-  data/triples/train.tsv   (80 % de incidencias + tripletas auxiliares)
-  data/triples/valid.tsv   (10 % de incidencias)
-  data/triples/test.tsv    (10 % de incidencias)
+Modo no_split (train_full.ttl generado por fase 0):
+  Vuelca todas las tripletas en un único train.tsv sin ningún split.
+  Usar cuando el 5% de test ya fue reservado previamente en la fase 0.
+
+Salida (modo normal):
+  data/triples/train.tsv   (80% incidencias + auxiliares)
+  data/triples/valid.tsv   (10% incidencias)
+  data/triples/test.tsv    (10% incidencias)
+
+Salida (modo no_split):
+  data/triples/train.tsv   (todas las tripletas)
+
+En ambos modos:
   out/maps/entity_to_id.json
   out/maps/relation_to_id.json
 
 Uso:
-  python src/phase1_triples.py
+  python src/phase1_triples.py              # modo normal (filtrado.ttl)
+  python src/phase1_triples.py --no-split   # modo no_split (train_full.ttl)
 """
 
+import argparse
 import json
 import random
 import sys
 from pathlib import Path
 
-# Añadir src/ al path para importar generate_corpus
 sys.path.insert(0, str(Path(__file__).parent))
 
 from rdflib import RDF
 
 import config as cfg
-from generate_corpus import load_graph, extract_label
+from phase1b_generate_corpus import load_graph, extract_label
 
 
 # ---------------------------------------------------------------------------
@@ -157,35 +166,55 @@ def build_and_save_mappings(
 # Punto de entrada
 # ---------------------------------------------------------------------------
 
-def run() -> None:
+def run(no_split: bool = False) -> None:
     print("=" * 60)
     print("FASE 1 — Parseo del grafo RDF a tripletas TSV")
+    if no_split:
+        print("  Modo: no_split  (train_full.ttl → train.tsv único)")
+    else:
+        print("  Modo: normal    (filtrado.ttl  → train/valid/test 80/10/10)")
     print("=" * 60)
 
+    input_file = cfg.TRAIN_TTL if no_split else cfg.TTL_FILE
+
+    if not input_file.exists():
+        raise FileNotFoundError(
+            f"No se encontró {input_file}\n"
+            + ("  Ejecuta primero: python src/run_pipeline.py --phase 0"
+               if no_split else "")
+        )
+
     # 1. Cargar grafo
-    g = load_graph(cfg.TTL_FILE)
+    g = load_graph(input_file)
 
     # 2. Extraer tripletas
-    print("[1/4] Extrayendo tripletas ...")
+    print("[1/3] Extrayendo tripletas ...")
     all_triples = extract_all_triples(g)
 
-    # 3. Dividir por incidencias
-    print("[2/4] Dividiendo por incidencias en train/valid/test (80/10/10) ...")
-    train_triples, valid_triples, test_triples = split_by_incident(all_triples)
-
-    # 4. Guardar TSV
-    print("[3/4] Guardando archivos TSV ...")
     cfg.TRIPLES_DIR.mkdir(parents=True, exist_ok=True)
-    save_tsv(train_triples, cfg.TRAIN_TSV)
-    save_tsv(valid_triples, cfg.VALID_TSV)
-    save_tsv(test_triples,  cfg.TEST_TSV)
 
-    # 5. Mapas
-    print("[4/4] Generando mapas entidad/relación → id ...")
+    if no_split:
+        # Modo no_split: todo va a train.tsv
+        print("[2/3] Guardando train.tsv (sin split) ...")
+        save_tsv(all_triples, cfg.TRAIN_TSV)
+    else:
+        # Modo normal: split 80/10/10
+        print("[2/3] Dividiendo por incidencias en train/valid/test (80/10/10) ...")
+        train_triples, valid_triples, test_triples = split_by_incident(all_triples)
+        save_tsv(train_triples, cfg.TRAIN_TSV)
+        save_tsv(valid_triples, cfg.VALID_TSV)
+        save_tsv(test_triples,  cfg.TEST_TSV)
+
+    # 3. Mapas
+    print("[3/3] Generando mapas entidad/relación → id ...")
     build_and_save_mappings(all_triples)
 
     print("\n✓ Fase 1 completada.")
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no-split", action="store_true",
+                        help="Usa train_full.ttl y vuelca todo en train.tsv (sin split)")
+    args = parser.parse_args()
+    run(no_split=args.no_split)

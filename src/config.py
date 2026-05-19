@@ -19,6 +19,8 @@ except ImportError:
 BASE_DIR    = Path(__file__).parent.parent
 DATA_DIR    = BASE_DIR / "data"
 TTL_FILE    = DATA_DIR / "filtrado.ttl"
+TRAIN_TTL   = DATA_DIR / "train_full.ttl"   # generado por phase0_preprocess
+TEST_TTL    = DATA_DIR / "test_eval.ttl"
 
 TRIPLES_DIR = DATA_DIR / "triples"
 CORPUS_DIR  = DATA_DIR / "corpus"
