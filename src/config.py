@@ -107,7 +107,7 @@ ENTITY_EVAL_PAIRS = [
 # ---------------------------------------------------------------------------
 
 EMBEDDING_DIM  = 256
-N_EPOCHS       = 600
+N_EPOCHS       = 150
 BATCH_SIZE     = 2048
 LEARNING_RATE  = 1e-3
 NEG_PER_POS    = 128      # 128 para NSSA (escala con negativos), 50 default A100, 10 fallback CPU
