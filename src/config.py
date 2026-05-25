@@ -107,10 +107,10 @@ ENTITY_EVAL_PAIRS = [
 # ---------------------------------------------------------------------------
 
 EMBEDDING_DIM  = 256
-N_EPOCHS       = 100
+N_EPOCHS       = 50
 BATCH_SIZE     = 5500
 LEARNING_RATE  = 1e-3
-NEG_PER_POS    = 10      # 128 para NSSA (escala con negativos), 50 default A100, 10 fallback CPU
+NEG_PER_POS    = 10 
 RANDOM_SEED    = 42
 
 SLICE_SIZE=5000

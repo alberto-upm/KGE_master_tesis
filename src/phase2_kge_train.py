@@ -132,9 +132,9 @@ def train(
     print(f"\n[2/3] Entrenando {model_name}  "
           f"(dim={dim}, epochs={epochs}, loss={loss}, "
           f"sampler={sampler}, device={device}, eval_batch={eval_batch_size}) ...")
-    print(f"      Early stopping: metric={cfg.EARLY_STOP_METRIC}  "
-          f"freq={cfg.EARLY_STOP_FREQUENCY}  patience={cfg.EARLY_STOP_PATIENCE}  "
-          f"delta={cfg.EARLY_STOP_RELATIVE_DELTA}")
+    # print(f"      Early stopping: metric={cfg.EARLY_STOP_METRIC}  "
+    #       f"freq={cfg.EARLY_STOP_FREQUENCY}  patience={cfg.EARLY_STOP_PATIENCE}  "
+    #       f"delta={cfg.EARLY_STOP_RELATIVE_DELTA}")
 
     pipeline_kwargs = dict(
         training=training,
@@ -157,15 +157,16 @@ def train(
             batch_size=eval_batch_size,
             slice_size=cfg.SLICE_SIZE,
         ),
-        # Early stopping: si MRR no mejora 0.002 en 3 épocas seguidas, para.
-        stopper="early",
-        stopper_kwargs=dict(
-            frequency=cfg.EARLY_STOP_FREQUENCY,
-            patience=cfg.EARLY_STOP_PATIENCE,
-            relative_delta=cfg.EARLY_STOP_RELATIVE_DELTA,
-            metric=cfg.EARLY_STOP_METRIC,
-            evaluation_slice_size=cfg.SLICE_SIZE,
-        ),
+        # Early stopping desactivado temporalmente (bug NVML en evals
+        # intermedias dentro del contenedor de Jupyter).
+        # stopper="early",
+        # stopper_kwargs=dict(
+        #     frequency=cfg.EARLY_STOP_FREQUENCY,
+        #     patience=cfg.EARLY_STOP_PATIENCE,
+        #     relative_delta=cfg.EARLY_STOP_RELATIVE_DELTA,
+        #     metric=cfg.EARLY_STOP_METRIC,
+        #     evaluation_slice_size=cfg.SLICE_SIZE,
+        # ),
         random_seed=cfg.RANDOM_SEED,
         device=device,
     )
