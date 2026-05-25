@@ -103,18 +103,18 @@ ENTITY_EVAL_PAIRS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Hiperparámetros KGE (DistMult)
+# Hiperparámetros KGE 
 # ---------------------------------------------------------------------------
 
 EMBEDDING_DIM  = 256
-N_EPOCHS       = 150
-BATCH_SIZE     = 2048
+N_EPOCHS       = 100
+BATCH_SIZE     = 5500
 LEARNING_RATE  = 1e-3
-NEG_PER_POS    = 128      # 128 para NSSA (escala con negativos), 50 default A100, 10 fallback CPU
+NEG_PER_POS    = 10      # 128 para NSSA (escala con negativos), 50 default A100, 10 fallback CPU
 RANDOM_SEED    = 42
 
-TRAIN_RATIO    = 0.80
-VALID_RATIO    = 0.10
+#TRAIN_RATIO    = 0.80
+#VALID_RATIO    = 0.10
 # TEST_RATIO = 0.10 (implícito)
 
 # ---------------------------------------------------------------------------

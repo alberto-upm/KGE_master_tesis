@@ -149,8 +149,13 @@ def train(
         negative_sampler_kwargs=dict(num_negs_per_pos=cfg.NEG_PER_POS),
         evaluator="RankBasedEvaluator",
         evaluator_kwargs=dict(filtered=True),
-        # Evaluación siempre en CPU para evitar OOM en GPU
-        evaluation_kwargs=dict(batch_size=eval_batch_size, device="cpu"),
+        # Evaluación en la misma device que el entrenamiento (GPU si device="cuda").
+        # automatic_memory_optimization=True deja que PyKEEN reduzca el batch
+        # dinámicamente si detecta OOM, partiendo del eval_batch_size indicado.
+        evaluation_kwargs=dict(
+            batch_size=eval_batch_size,
+            automatic_memory_optimization=True,
+        ),
         random_seed=cfg.RANDOM_SEED,
         device=device,
     )

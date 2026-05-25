@@ -123,6 +123,9 @@ PRED_TEMPLATES_ES = {
     "hasSupportGroup":       "El grupo de soporte de la incidencia {s} es {o}.",
     "hasSupportTeam":        "El equipo de soporte de la incidencia {s} es {o}.",
     "hasSupportCategory":    "La categoría de soporte de la incidencia {s} es {o}.",
+    "createdOn":             "La incidencia {s} se creó el {o}.",
+    "hasDedicationTimeMin":  "El tiempo dedicado a la incidencia {s} es de {o} minutos.",
+    "hasIntervention":       "La incidencia {s} tiene la intervención {o}.",
 }
 
 

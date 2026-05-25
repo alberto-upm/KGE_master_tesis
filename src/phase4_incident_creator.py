@@ -49,7 +49,11 @@ INCIDENT_PROPS = [
     "hasSupportTeam",         # 7: equipo de soporte
     "hasStateIncident",       # 8: estado
     "hasExternalTechnician",  # 9: técnico externo (opcional)
+    "hasIntervention",        # 10: intervenciones (multi-valor — cascada REGLA→KGE+CBR)
 ]
+
+# Campos del wizard que admiten múltiples valores (multi-selección en el menú).
+MULTI_VALUE_PROPS = {"hasIntervention"}
 
 _PROP_LABELS = {
     "int_hasCustomer":       "cliente",
@@ -61,6 +65,10 @@ _PROP_LABELS = {
     "hasSupportTeam":        "equipo de soporte",
     "hasStateIncident":      "estado",
     "hasExternalTechnician": "técnico externo",
+    "hasIntervention":       "intervenciones",
+    # Auto-rellenados al final (no entran en el bucle de recomendación)
+    "createdOn":             "fecha de creación",
+    "hasDedicationTimeMin":  "tiempo dedicado (min)",
 }
 
 
@@ -225,27 +233,36 @@ def recommend_property(
 def _build_incidents_map_from_tsv() -> dict:
     """
     Construye incidents_map = {incident_id: {predicate: [values]}} leyendo
-    train.tsv + valid.tsv directamente, sin pasar por rdflib.
+    cfg.TRAIN_TSV (data/triples/train.tsv) directamente, sin pasar por rdflib.
 
     Solo incluye triples cuya cabeza sea una incidencia (empieza por 'incident_')
     y cuya relación sea una de las propiedades relevantes (INCIDENT_PROPS).
+
+    FUTURO — enriquecer el pool CBR con las incidencias del split de
+    evaluación (cfg.TEST_TSV / data/triples/test.tsv), fusionándolas al
+    mismo dict en este bucle. ⚠ Sólo activarlo en producción: si se hace
+    antes de ejecutar la fase 6 se contamina el conjunto de test y las
+    métricas de Hits@K / MRR dejan de ser válidas.
     """
+    if not cfg.TRAIN_TSV.exists():
+        raise FileNotFoundError(
+            f"No se encontró {cfg.TRAIN_TSV}. "
+            "Ejecuta primero la fase 1 del pipeline."
+        )
+
     prop_set = set(INCIDENT_PROPS)
     incidents: dict = {}
-    for tsv_path in (cfg.TRAIN_TSV, cfg.VALID_TSV):
-        if not tsv_path.exists():
-            continue
-        with open(tsv_path, "r", encoding="utf-8") as fh:
-            for line in fh:
-                parts = line.rstrip("\n").split("\t")
-                if len(parts) != 3:
-                    continue
-                head, rel, tail = parts
-                if not head.startswith("incident_"):
-                    continue
-                if rel not in prop_set:
-                    continue
-                incidents.setdefault(head, {}).setdefault(rel, []).append(tail)
+    with open(cfg.TRAIN_TSV, "r", encoding="utf-8") as fh:
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) != 3:
+                continue
+            head, rel, tail = parts
+            if not head.startswith("incident_"):
+                continue
+            if rel not in prop_set:
+                continue
+            incidents.setdefault(head, {}).setdefault(rel, []).append(tail)
     return incidents
 
 
@@ -281,8 +298,8 @@ class IncidentCreatorSession:
         print("  Cargando recursos ...")
         print(f"{'='*60}")
 
-        # Mapa de incidencias históricas (desde TSV, sin rdflib)
-        print(f"  [1/4] Cargando incidencias desde TSV ...")
+        # Mapa de incidencias históricas (desde data/triples/train.tsv)
+        print(f"  [1/4] Cargando incidencias desde train.tsv ...")
         self.incidents_map = _build_incidents_map_from_tsv()
         print(f"        {len(self.incidents_map):,} incidencias históricas cargadas.")
 
@@ -390,12 +407,132 @@ class IncidentCreatorSession:
         return raw if raw in known_ids else None
 
     # ------------------------------------------------------------------
+    # Recolección de campos multi-valor (ej. hasIntervention)
+    # ------------------------------------------------------------------
+
+    def _collect_multi_value(
+        self,
+        prop: str,
+        label: str,
+        incident: dict,
+        sources: dict,
+    ) -> str | None:
+        """
+        Recoge múltiples valores para un campo multi-valor.
+        Cascada REGLA → KGE+CBR. La regla aporta UN candidato (que se mezcla
+        con las recomendaciones KGE+CBR como sugerencia preferente). El
+        usuario puede seleccionar varias opciones por número o ID separados
+        por coma (p.ej. "1,3" o "intervention_x,intervention_y").
+
+        Retorna "__exit__" si el usuario quiere salir, None en otro caso.
+        """
+        # 1. Intento de regla (si aplica) — su valor se promueve a primera opción
+        rule_hit = self.rule_engine.query(incident, prop)
+        rule_val = rule_hit["value"] if rule_hit else None
+
+        # 2. Recomendaciones KGE+CBR
+        recs, n_proxies = recommend_property(
+            known_props=incident,
+            target_prop=prop,
+            incidents_map=self.incidents_map,
+            model=self.model,
+            factory=self.factory,
+            top_k=self.top_k,
+        )
+
+        # 3. Construir lista combinada de opciones a mostrar
+        #    (regla primero si existe y no está ya en recs)
+        rec_ids = [ent for ent, *_ in recs]
+        if rule_val and rule_val not in rec_ids:
+            options = [(rule_val, "RULE", rule_hit)] + [(e, "KGE", r) for e, r in zip(rec_ids, recs)]
+        else:
+            options = [(e, "KGE", r) for e, r in zip(rec_ids, recs)]
+
+        # 4. Mostrar opciones
+        print(f"\n[{label}] (multi-valor, puede haber 0, 1 o varias)")
+        if options:
+            print("Opciones recomendadas:")
+            for i, (ent, src, info) in enumerate(options, 1):
+                if src == "RULE":
+                    rid  = info["rule_id"]
+                    conf = info["confidence"]
+                    print(f"  {i}. {ent}  [REGLA {rid}  conf={conf:.4f}]")
+                else:
+                    _, freq, score, wrrf = info
+                    print(f"  {i}. {ent}  (freq: {freq}, score: {score:.3f}, WRRF: {wrrf:.5f})")
+            print("Responde con números o IDs separados por coma (p.ej. '1,3' o 'id1,id2').")
+        else:
+            print("[KGE] Sin recomendaciones. Escribe los IDs separados por coma.")
+        print("(Enter/skip = ninguna, exit = salir)")
+
+        try:
+            user_input = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return "__exit__"
+
+        cmd = user_input.lower()
+        if cmd in ("salir", "exit", "quit"):
+            return "__exit__"
+        if cmd in ("", "saltar", "skip"):
+            print(f"  ⟳ {label} dejado sin rellenar.")
+            return None
+
+        # 5. Parsear tokens separados por coma → lista de valores
+        tokens = [t.strip() for t in user_input.split(",") if t.strip()]
+        chosen: list[str] = []
+        used_rule  = False
+        used_kge   = False
+        used_user  = False
+        for tok in tokens:
+            if tok.isdigit():
+                idx = int(tok) - 1
+                if 0 <= idx < len(options):
+                    ent, src, _ = options[idx]
+                    chosen.append(ent)
+                    if src == "RULE":
+                        used_rule = True
+                    else:
+                        used_kge = True
+                else:
+                    print(f"  [!] Número fuera de rango: {tok}")
+            else:
+                chosen.append(tok)
+                if tok in rec_ids or tok == rule_val:
+                    used_kge = used_kge or (tok in rec_ids)
+                    used_rule = used_rule or (tok == rule_val)
+                else:
+                    used_user = True
+
+        if not chosen:
+            print(f"  [!] No se reconoció ningún valor. {label} dejado sin rellenar.")
+            return None
+
+        # Determinar fuente combinada para la trazabilidad
+        srcs = []
+        if used_rule: srcs.append("RULE")
+        if used_kge:  srcs.append("KGE")
+        if used_user: srcs.append("USUARIO")
+        src_type = "+".join(srcs) if srcs else "USUARIO"
+
+        incident[prop] = chosen
+        sources[prop] = {
+            "value":      chosen,
+            "source":     src_type,
+            "n_proxies":  n_proxies,
+            "n_selected": len(chosen),
+        }
+        print(f"  ✓ {label} = {chosen}  [{src_type}]  "
+              f"({len(chosen)} seleccionada{'s' if len(chosen) > 1 else ''})")
+        return None
+
+    # ------------------------------------------------------------------
     # Loop principal
     # ------------------------------------------------------------------
 
     def run(self) -> dict:
         """Ejecuta la sesión. Devuelve el dict de la incidencia completada."""
-        incident: dict[str, str | None] = {p: None for p in INCIDENT_PROPS}
+        # Los campos multi-valor (hasIntervention) almacenan lista; el resto, string.
+        incident: dict[str, str | list[str] | None] = {p: None for p in INCIDENT_PROPS}
         # Trazabilidad: {prop → {"value", "source", ...}}
         sources: dict[str, dict] = {}
         self._sources = sources
@@ -443,6 +580,17 @@ class IncidentCreatorSession:
 
             # Saltar si ya está relleno (por texto libre o paso anterior)
             if incident[prop] is not None:
+                prop_idx += 1
+                recs = []
+                continue
+
+            # Rama multi-valor (ej. hasIntervention): recolecta varios IDs
+            # con cascada REGLA → KGE+CBR en un único paso.
+            if prop in MULTI_VALUE_PROPS:
+                result = self._collect_multi_value(prop, label, incident, sources)
+                if result == "__exit__":
+                    print("\n[Salida — guardando lo completado]")
+                    break
                 prop_idx += 1
                 recs = []
                 continue
@@ -665,11 +813,41 @@ class IncidentCreatorSession:
         """Verbaliza, genera resumen LLM y guarda en JSONL."""
         from phase4_llm_inference import verbalize_props
 
+        # ------------------------------------------------------------------
+        # Auto-completado de campos finales (no entran en el wizard):
+        #   - createdOn            → fecha de hoy (DD/MM/YYYY)
+        #   - hasDedicationTimeMin → input numérico del usuario (minutos)
+        # Las intervenciones (hasIntervention) se gestionarán al final en
+        # una iteración futura, recomendando hasSupportTeam/hasTechnician
+        # de cada intervención asociada.
+        # ------------------------------------------------------------------
+        _sources = getattr(self, "_sources", {})
+
+        today_str = datetime.now().strftime("%d/%m/%Y")
+        incident["createdOn"] = today_str
+        _sources["createdOn"] = {"value": today_str, "source": "AUTO"}
+        print(f"\n[AUTO] Fecha de creación = {today_str}")
+
+        try:
+            raw_time = input("Tiempo dedicado (minutos, Enter para 0) > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            raw_time = ""
+        try:
+            dedication_min = int(raw_time) if raw_time else 0
+        except ValueError:
+            dedication_min = 0
+        incident["hasDedicationTimeMin"] = dedication_min
+        _sources["hasDedicationTimeMin"] = {"value": dedication_min, "source": "USUARIO"}
+        print(f"[OK]   Tiempo dedicado = {dedication_min} min")
+
         filled = {k: v for k, v in incident.items() if v is not None}
         n_filled = len(filled)
 
+        # Total de campos = INCIDENT_PROPS (recomendados) + 2 (auto-completados)
+        total_fields = len(INCIDENT_PROPS) + 2
+
         print(f"\n{'='*60}")
-        print(f"  Incidencia completada ({n_filled}/{len(INCIDENT_PROPS)} campos)")
+        print(f"  Incidencia completada ({n_filled}/{total_fields} campos)")
         print(f"{'='*60}")
 
         if not filled:
