@@ -152,29 +152,19 @@ def train(
         negative_sampler=sampler,
         negative_sampler_kwargs=dict(num_negs_per_pos=cfg.NEG_PER_POS),
         evaluator="RankBasedEvaluator",
-        # AMO desactivado en el CONSTRUCTOR del evaluator (no solo en
-        # evaluation_kwargs) para que se aplique también al evaluador interno
-        # del EarlyStopper. El sondeo NVML de torch_max_mem peta en entornos
-        # containerizados (Jupyter/Docker) con "NVML_SUCCESS == r INTERNAL
-        # ASSERT FAILED" en cuanto el stopper hace la primera evaluación.
-        evaluator_kwargs=dict(
-            filtered=True,
-            automatic_memory_optimization=False,
-        ),
-        # Batch fijo para la evaluación final (32 normal / 8 ComplEx). Si da
-        # OOM real, bájalo a mano en _model_config.
+        evaluator_kwargs=dict(filtered=True),
         evaluation_kwargs=dict(
             batch_size=eval_batch_size,
+            slice_size=cfg.SLICE_SIZE,
         ),
-        # Early stopping: evalúa MRR en validación cada N épocas y para si no
-        # mejora durante `patience` evaluaciones consecutivas.
+        # Early stopping: si MRR no mejora 0.002 en 3 épocas seguidas, para.
         stopper="early",
         stopper_kwargs=dict(
             frequency=cfg.EARLY_STOP_FREQUENCY,
             patience=cfg.EARLY_STOP_PATIENCE,
             relative_delta=cfg.EARLY_STOP_RELATIVE_DELTA,
             metric=cfg.EARLY_STOP_METRIC,
-            evaluation_batch_size=eval_batch_size,
+            evaluation_slice_size=cfg.SLICE_SIZE,
         ),
         random_seed=cfg.RANDOM_SEED,
         device=device,
