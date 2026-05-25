@@ -113,6 +113,7 @@ LEARNING_RATE  = 1e-3
 NEG_PER_POS    = 10 
 RANDOM_SEED    = 42
 
+BATCH_SIZE_EVAL = 1024
 SLICE_SIZE=5000
 
 # Early stopping (PyKEEN EarlyStopper). Activado en phase2.

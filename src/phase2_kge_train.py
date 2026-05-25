@@ -154,7 +154,7 @@ def train(
         evaluator="RankBasedEvaluator",
         evaluator_kwargs=dict(filtered=True),
         evaluation_kwargs=dict(
-            batch_size=eval_batch_size,
+            batch_size=cfg.BATCH_SIZE_EVAL,
             slice_size=cfg.SLICE_SIZE,
         ),
         # Early stopping desactivado temporalmente (bug NVML en evals
