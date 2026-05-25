@@ -119,8 +119,8 @@ EARLY_STOP_PATIENCE       = 3         # nº de evaluaciones consecutivas sin mej
 EARLY_STOP_RELATIVE_DELTA = 0.002     # mejora relativa mínima para considerar progreso
 EARLY_STOP_METRIC         = "inverse_harmonic_mean_rank"  # MRR (mayor = mejor)
 
-#TRAIN_RATIO    = 0.80
-#VALID_RATIO    = 0.10
+TRAIN_RATIO    = 0.80
+VALID_RATIO    = 0.10
 # TEST_RATIO = 0.10 (implícito)
 
 # ---------------------------------------------------------------------------

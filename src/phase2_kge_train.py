@@ -154,11 +154,13 @@ def train(
         evaluator="RankBasedEvaluator",
         evaluator_kwargs=dict(filtered=True),
         # Evaluación en la misma device que el entrenamiento (GPU si device="cuda").
-        # automatic_memory_optimization=True deja que PyKEEN reduzca el batch
-        # dinámicamente si detecta OOM, partiendo del eval_batch_size indicado.
+        # AMO desactivado: el sondeo NVML de torch_max_mem peta en entornos
+        # containerizados (Jupyter/Docker) con "NVML_SUCCESS == r INTERNAL
+        # ASSERT FAILED". Usamos batch fijo = eval_batch_size (32 / 8 para
+        # ComplEx). Si da OOM real, bájalo a mano en _model_config.
         evaluation_kwargs=dict(
             batch_size=eval_batch_size,
-            automatic_memory_optimization=True,
+            automatic_memory_optimization=False,
         ),
         # Early stopping: evalúa MRR en validación cada N épocas y para si no
         # mejora durante `patience` evaluaciones consecutivas.
