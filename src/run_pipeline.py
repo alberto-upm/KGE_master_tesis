@@ -34,6 +34,16 @@ Uso:
   python src/run_pipeline.py --phase 6 --n-samples 100          # menos muestras
   python src/run_pipeline.py --phase 6 --kge-model TransE
 
+  # Evaluación end-to-end del incident creator (cascada REGLA → KGE+CBR sobre test_eval.ttl)
+  # Para cada incidencia del 5% de test:
+  #   1) intenta la regla: acierto = rule_hit; valor distinto = rule_miss → cae a KGE+CBR
+  #   2) KGE+CBR: si el valor real está en top-K = kge_hit (con rank); si no = fail
+  # Saltos: campos vacíos en la incidencia y campos multi-valor (hasIntervention)
+  # Resultados: out/evaluation/incident_creator_full/<ts>/{results.json, per_property.csv, predictions.csv}
+  python src/run_pipeline.py --phase 6_full
+  python src/run_pipeline.py --phase 6_full --kge-model TransE
+  python src/run_pipeline.py --phase 6_full --n-samples 200
+
   # Comparación de modelos KGE
   python src/run_pipeline.py --phase compare --n-samples 200
   python src/run_pipeline.py --phase compare --verbalization-check
@@ -186,6 +196,16 @@ def run_phase6(kge_model=None, n_samples=None, use_llm=False, llm_model=None):
     )
 
 
+def run_phase6_full(kge_model=None, n_samples=None, top_k=None):
+    """Eval end-to-end del incident creator (cascada REGLA → KGE+CBR sobre test_eval.ttl)."""
+    from phase6_eval_incident_creator import run
+    run(
+        kge_model_name=kge_model or 'TransE',
+        n_samples=n_samples,
+        top_k_values=tuple(top_k) if top_k else (1, 3, 5, 10),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Punto de entrada
 # ---------------------------------------------------------------------------
@@ -199,7 +219,7 @@ def main():
     parser.add_argument(
         "--phase",
         default="all",
-        choices=["all", "0", "1", "1b", "2", "3", "5", "6",
+        choices=["all", "0", "1", "1b", "2", "3", "5", "6", "6_full",
                  "compare", "create_incident"],
         help="Fase a ejecutar (default: all)",
     )
@@ -273,6 +293,11 @@ def main():
                 n_samples=args.n_samples,
                 use_llm=not args.no_llm,
                 llm_model=args.model,
+            )
+        elif p == "6_full":
+            run_phase6_full(
+                kge_model=args.kge_model,
+                n_samples=args.n_samples,
             )
         elif p == "compare":
             run_model_comparison(

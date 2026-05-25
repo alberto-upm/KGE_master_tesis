@@ -30,6 +30,7 @@ import argparse
 import csv
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import torch
@@ -131,6 +132,9 @@ def train(
     print(f"\n[2/3] Entrenando {model_name}  "
           f"(dim={dim}, epochs={epochs}, loss={loss}, "
           f"sampler={sampler}, device={device}, eval_batch={eval_batch_size}) ...")
+    print(f"      Early stopping: metric={cfg.EARLY_STOP_METRIC}  "
+          f"freq={cfg.EARLY_STOP_FREQUENCY}  patience={cfg.EARLY_STOP_PATIENCE}  "
+          f"delta={cfg.EARLY_STOP_RELATIVE_DELTA}")
 
     pipeline_kwargs = dict(
         training=training,
@@ -155,6 +159,16 @@ def train(
         evaluation_kwargs=dict(
             batch_size=eval_batch_size,
             automatic_memory_optimization=True,
+        ),
+        # Early stopping: evalúa MRR en validación cada N épocas y para si no
+        # mejora durante `patience` evaluaciones consecutivas.
+        stopper="early",
+        stopper_kwargs=dict(
+            frequency=cfg.EARLY_STOP_FREQUENCY,
+            patience=cfg.EARLY_STOP_PATIENCE,
+            relative_delta=cfg.EARLY_STOP_RELATIVE_DELTA,
+            metric=cfg.EARLY_STOP_METRIC,
+            evaluation_batch_size=eval_batch_size,
         ),
         random_seed=cfg.RANDOM_SEED,
         device=device,
@@ -195,6 +209,16 @@ def train(
         if v is not None:
             print(f"  {k}: {v:.4f}")
 
+    # Añadir fila al control de versiones (CSV/JSON acumulativos)
+    _append_to_comparison_table(
+        model_name=model_name,
+        result=result,
+        dim=dim,
+        epochs=epochs,
+        lr=lr,
+        device=device,
+    )
+
     print(f"\n✓ Fase 2 completada para {model_name}.")
     return result
 
@@ -210,7 +234,14 @@ def train_all_models(
     lr:     float = cfg.LEARNING_RATE,
     device: str   = "cpu",
 ) -> dict:
-    """Entrena todos los modelos en cfg.KGE_MODELS y guarda tabla comparativa."""
+    """
+    Entrena todos los modelos en cfg.KGE_MODELS.
+
+    Cada llamada a train() ya añade su fila al fichero acumulativo
+    (training_comparison.csv / .json) vía _append_to_comparison_table.
+    Aquí solo se imprime un resumen ASCII final con los modelos de esta
+    sesión.
+    """
     results = {}
     for model_name in cfg.KGE_MODELS:
         print(f"\n{'='*60}\nEntrenando {model_name}\n{'='*60}")
@@ -218,12 +249,86 @@ def train_all_models(
             model_name=model_name,
             epochs=epochs, dim=dim, batch=batch, lr=lr, device=device,
         )
-    _save_comparison_table(results)
+    _print_session_summary(results)
     return results
 
 
-def _save_comparison_table(results: dict) -> None:
-    """Extrae métricas de cada resultado PyKEEN y guarda JSON + CSV."""
+_COMPARISON_FIELDS = [
+    "timestamp", "model", "dim", "epochs", "lr", "device",
+    "hit@1", "hit@3", "hit@10", "mrr",
+]
+
+
+def _append_to_comparison_table(
+    model_name: str,
+    result,
+    dim:    int,
+    epochs: int,
+    lr:     float,
+    device: str,
+) -> dict:
+    """
+    Añade una fila al fichero acumulativo de comparación de modelos.
+
+    Cada entrenamiento (independientemente de si fue individual o vía
+    --all-models) inserta una nueva fila con timestamp, hiperparámetros
+    y métricas finales del test set. Es un log de versiones: si el
+    mismo modelo se entrena varias veces, aparecerán varias filas y
+    podrás comparar cómo evolucionan las métricas según los hiperparámetros.
+
+    Salida:
+      out/evaluation/model_comparison/training_comparison.csv  (append)
+      out/evaluation/model_comparison/training_comparison.json (append)
+    """
+    metrics = result.metric_results.to_dict()
+    hits    = metrics.get("both", {}).get("realistic", {})
+
+    row = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "model":     model_name,
+        "dim":       dim,
+        "epochs":    epochs,
+        "lr":        lr,
+        "device":    device,
+        "hit@1":     round(hits.get("hits_at_1",  0.0), 4),
+        "hit@3":     round(hits.get("hits_at_3",  0.0), 4),
+        "hit@10":    round(hits.get("hits_at_10", 0.0), 4),
+        "mrr":       round(hits.get("mean_reciprocal_rank", 0.0), 4),
+    }
+
+    cfg.MODEL_COMPARISON_DIR.mkdir(parents=True, exist_ok=True)
+    csv_path  = cfg.MODEL_COMPARISON_DIR / "training_comparison.csv"
+    json_path = cfg.MODEL_COMPARISON_DIR / "training_comparison.json"
+
+    # CSV: append-mode con header si no existe
+    is_new = not csv_path.exists()
+    with open(csv_path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=_COMPARISON_FIELDS)
+        if is_new:
+            writer.writeheader()
+        writer.writerow(row)
+
+    # JSON: leer, añadir, guardar (formato lista de dicts)
+    existing: list = []
+    if json_path.exists():
+        try:
+            with open(json_path, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                existing = data
+        except json.JSONDecodeError:
+            existing = []
+    existing.append(row)
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(existing, f, ensure_ascii=False, indent=2)
+
+    print(f"\n  Tabla comparativa actualizada: {csv_path}")
+    print(f"    Entradas totales: {len(existing)}  (entrada nueva: {row['timestamp']})")
+    return row
+
+
+def _print_session_summary(results: dict) -> None:
+    """Imprime una tabla ASCII con los modelos entrenados en esta sesión."""
     rows = []
     for model_name, result in results.items():
         metrics = result.metric_results.to_dict()
@@ -236,28 +341,14 @@ def _save_comparison_table(results: dict) -> None:
             "mrr":     round(hits.get("mean_reciprocal_rank", 0.0), 4),
         })
 
-    cfg.MODEL_COMPARISON_DIR.mkdir(parents=True, exist_ok=True)
-
-    json_path = cfg.MODEL_COMPARISON_DIR / "training_comparison.json"
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(rows, f, ensure_ascii=False, indent=2)
-
-    csv_path = cfg.MODEL_COMPARISON_DIR / "training_comparison.csv"
-    fieldnames = ["model", "hit@1", "hit@3", "hit@10", "mrr"]
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-    # Tabla ASCII en consola
     print("\n" + "=" * 55)
+    print(f"  Resumen de sesión")
     print(f"  {'Modelo':<12} {'Hit@1':>8} {'Hit@3':>8} {'Hit@10':>8} {'MRR':>8}")
     print("  " + "-" * 51)
     for row in rows:
         print(f"  {row['model']:<12} {row['hit@1']:>8.4f} {row['hit@3']:>8.4f} "
               f"{row['hit@10']:>8.4f} {row['mrr']:>8.4f}")
     print("=" * 55)
-    print(f"\n  Tabla guardada en {csv_path}")
 
 
 # ---------------------------------------------------------------------------

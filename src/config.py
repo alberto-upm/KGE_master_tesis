@@ -113,6 +113,12 @@ LEARNING_RATE  = 1e-3
 NEG_PER_POS    = 10      # 128 para NSSA (escala con negativos), 50 default A100, 10 fallback CPU
 RANDOM_SEED    = 42
 
+# Early stopping (PyKEEN EarlyStopper). Activado en phase2.
+EARLY_STOP_FREQUENCY      = 5         # evaluar en validación cada N épocas
+EARLY_STOP_PATIENCE       = 3         # nº de evaluaciones consecutivas sin mejora antes de parar
+EARLY_STOP_RELATIVE_DELTA = 0.002     # mejora relativa mínima para considerar progreso
+EARLY_STOP_METRIC         = "inverse_harmonic_mean_rank"  # MRR (mayor = mejor)
+
 #TRAIN_RATIO    = 0.80
 #VALID_RATIO    = 0.10
 # TEST_RATIO = 0.10 (implícito)
