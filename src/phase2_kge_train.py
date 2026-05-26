@@ -30,6 +30,7 @@ import argparse
 import csv
 import json
 import sys
+import warnings
 from datetime import datetime
 from pathlib import Path
 
@@ -38,6 +39,15 @@ import torch
 import os
 os.environ["PYKEEN_NO_CUDA_OOM_DETECTION"] = "1"  # antes de importar pykeen
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+
+# Silenciar el warning de PyTorch sobre `scheduler.step(epoch=...)`.
+# PyKEEN lo llama así por compatibilidad; PyTorch lo desaprueba pero sigue
+# funcionando. El aviso ensucia la barra tqdm cada época.
+warnings.filterwarnings(
+    "ignore",
+    message=r".*epoch parameter in `scheduler\.step\(\)`.*",
+    category=UserWarning,
+)
 
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
@@ -316,14 +326,14 @@ def train(
         ),
         # Early stopping desactivado temporalmente (bug NVML en evals
         # intermedias dentro del contenedor de Jupyter).
-        stopper="early",
-        stopper_kwargs=dict(
-            frequency=cfg.EARLY_STOP_FREQUENCY,
-            patience=cfg.EARLY_STOP_PATIENCE,
-            relative_delta=cfg.EARLY_STOP_RELATIVE_DELTA,
-            metric=cfg.EARLY_STOP_METRIC,
-            evaluation_slice_size=cfg.SLICE_SIZE,
-        ),
+        # stopper="early",
+        # stopper_kwargs=dict(
+        #    frequency=cfg.EARLY_STOP_FREQUENCY,
+        #    patience=cfg.EARLY_STOP_PATIENCE,
+        #    relative_delta=cfg.EARLY_STOP_RELATIVE_DELTA,
+        #    metric=cfg.EARLY_STOP_METRIC,
+        #    evaluation_slice_size=cfg.SLICE_SIZE,
+        # ),
         random_seed=cfg.RANDOM_SEED,
         device=device,
     )
