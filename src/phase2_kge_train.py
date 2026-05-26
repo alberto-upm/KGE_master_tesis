@@ -147,13 +147,14 @@ def train(
         model_kwargs=model_kwargs,
         optimizer="Adam",
         optimizer_kwargs=dict(lr=lr),
-        # Scheduler: reduce LR cuando el MRR se estanca
-        lr_scheduler="ReduceLROnPlateau",
+        # Scheduler: reduce LR de forma suave (coseno) hasta eta_min.
+        # ReduceLROnPlateau no encaja porque PyKEEN solo llama step(epoch)
+        # y ese scheduler necesita la métrica de validación (que requiere
+        # early stopper activo).
+        lr_scheduler="CosineAnnealingLR",
         lr_scheduler_kwargs=dict(
-            mode="max",
-            factor=cfg.LR_FACTOR,
-            patience=cfg.LR_PATIENCE,
-            min_lr=cfg.LR_MIN,
+            T_max=epochs,
+            eta_min=cfg.LR_MIN,
         ),
         training_loop="sLCWA",
         training_loop_kwargs=dict(automatic_memory_optimization=False),
