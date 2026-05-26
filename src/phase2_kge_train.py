@@ -37,6 +37,7 @@ import torch
 
 import os
 os.environ["PYKEEN_NO_CUDA_OOM_DETECTION"] = "1"  # antes de importar pykeen
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
@@ -84,6 +85,150 @@ def _model_config(model_lower: str, dim: int, margin: float) -> dict:
         # Fallback genérico para cualquier otro modelo de PyKEEN
         return {**bce, "model_kwargs": dict(embedding_dim=dim)}
     return configs[model_lower]
+
+
+# ---------------------------------------------------------------------------
+# Plots de diagnóstico (curva de loss + t-SNE de embeddings)
+# ---------------------------------------------------------------------------
+
+def _entity_type(label: str) -> str:
+    """Clasifica una entidad por prefijo de su label."""
+    prefixes = {
+        "incident_":       "incident",
+        "intervention_":   "intervention",
+        "company":         "company",
+        "employee":        "employee",
+        "supportGroup":    "supportGroup",
+        "supportTeam":     "supportTeam",
+        "supportCategory": "supportCategory",
+        "statusIncident":  "status",
+        "typeIncident":    "type",
+        "incidentOrigin":  "origin",
+        "person_":         "person",
+    }
+    for pref, etype in prefixes.items():
+        if label.startswith(pref):
+            return etype
+    return "other"
+
+
+_TYPE_COLORS = {
+    "incident":        "#1f77b4",
+    "intervention":    "#bcbd22",
+    "company":         "#ff7f0e",
+    "employee":        "#2ca02c",
+    "supportGroup":    "#d62728",
+    "supportTeam":     "#9467bd",
+    "supportCategory": "#17becf",
+    "status":          "#8c564b",
+    "type":            "#e377c2",
+    "origin":          "#7f7f7f",
+    "person":          "#aec7e8",
+    "other":           "#cccccc",
+}
+
+
+def _plot_loss_curve(
+    result,
+    model_name: str,
+    out_dir: Path,
+    timestamp: str,
+) -> None:
+    """
+    Guarda la curva de loss en
+      out_dir/loss_curve_<modelo>_<timestamp>.png
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")  # backend sin display (servidor)
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("      [!] matplotlib no instalado; se omite plot de loss.")
+        return
+
+    losses = getattr(result, "losses", None) or []
+    if not losses:
+        print("      [!] No hay losses registradas en el resultado.")
+        return
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"loss_curve_{model_name.lower()}_{timestamp}.png"
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(range(1, len(losses) + 1), losses, marker="o", color="steelblue")
+    plt.title(f"Curva de pérdida — {model_name}")
+    plt.xlabel("Época")
+    plt.ylabel("Loss")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=120)
+    plt.close()
+    print(f"      Loss curve → {out_path}")
+
+
+def _plot_tsne_embeddings(
+    entity_embs,
+    factory,
+    model_name: str,
+    out_dir: Path,
+    timestamp: str,
+    n_sample: int = 2000,
+    seed: int = 42,
+) -> None:
+    """
+    Guarda un t-SNE 2D de los embeddings de entidades en
+      out_dir/tsne_entities_<modelo>_<timestamp>.png
+    coloreado por tipo (incident, company, employee, supportGroup, ...).
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from sklearn.manifold import TSNE
+        import numpy as np
+    except ImportError as e:
+        print(f"      [!] Falta dependencia para t-SNE ({e}); se omite.")
+        return
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"tsne_entities_{model_name.lower()}_{timestamp}.png"
+
+    embs_np = entity_embs.detach().cpu().numpy() if hasattr(entity_embs, "detach") \
+        else np.asarray(entity_embs)
+    # Para embeddings complejos (RotatE/ComplEx), proyectamos la parte real
+    if np.iscomplexobj(embs_np):
+        embs_np = embs_np.real
+
+    n_total = embs_np.shape[0]
+    n = min(n_sample, n_total)
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(n_total, n, replace=False)
+    sample = embs_np[idx]
+
+    id_to_label = {v: k for k, v in factory.entity_to_id.items()}
+    labels = [id_to_label.get(int(i), "other") for i in idx]
+    types  = [_entity_type(l) for l in labels]
+
+    print(f"      Calculando t-SNE sobre {n:,} entidades ...")
+    tsne = TSNE(n_components=2, random_state=seed, perplexity=30,
+                init="pca", learning_rate="auto")
+    embs_2d = tsne.fit_transform(sample)
+
+    plt.figure(figsize=(12, 8))
+    for etype, color in _TYPE_COLORS.items():
+        mask = [i for i, t in enumerate(types) if t == etype]
+        if mask:
+            plt.scatter(
+                embs_2d[mask, 0], embs_2d[mask, 1],
+                c=color, label=f"{etype} ({len(mask)})",
+                alpha=0.6, s=15,
+            )
+    plt.title(f"t-SNE de embeddings — {model_name}  (n={n:,})", fontsize=13)
+    plt.legend(bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=9)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=120, bbox_inches="tight")
+    plt.close()
+    print(f"      t-SNE      → {out_path}")
 
 
 def train(
@@ -135,9 +280,9 @@ def train(
     print(f"\n[2/3] Entrenando {model_name}  "
           f"(dim={dim}, epochs={epochs}, loss={loss}, "
           f"sampler={sampler}, device={device}, eval_batch={cfg.BATCH_SIZE_EVAL}) ...")
-    # print(f"      Early stopping: metric={cfg.EARLY_STOP_METRIC}  "
-    #       f"freq={cfg.EARLY_STOP_FREQUENCY}  patience={cfg.EARLY_STOP_PATIENCE}  "
-    #       f"delta={cfg.EARLY_STOP_RELATIVE_DELTA}")
+    print(f"      Early stopping: metric={cfg.EARLY_STOP_METRIC}  "
+          f"freq={cfg.EARLY_STOP_FREQUENCY}  patience={cfg.EARLY_STOP_PATIENCE}  "
+          f"delta={cfg.EARLY_STOP_RELATIVE_DELTA}")
 
     pipeline_kwargs = dict(
         training=training,
@@ -171,14 +316,14 @@ def train(
         ),
         # Early stopping desactivado temporalmente (bug NVML en evals
         # intermedias dentro del contenedor de Jupyter).
-        # stopper="early",
-        # stopper_kwargs=dict(
-        #     frequency=cfg.EARLY_STOP_FREQUENCY,
-        #     patience=cfg.EARLY_STOP_PATIENCE,
-        #     relative_delta=cfg.EARLY_STOP_RELATIVE_DELTA,
-        #     metric=cfg.EARLY_STOP_METRIC,
-        #     evaluation_slice_size=cfg.SLICE_SIZE,
-        # ),
+        stopper="early",
+        stopper_kwargs=dict(
+            frequency=cfg.EARLY_STOP_FREQUENCY,
+            patience=cfg.EARLY_STOP_PATIENCE,
+            relative_delta=cfg.EARLY_STOP_RELATIVE_DELTA,
+            metric=cfg.EARLY_STOP_METRIC,
+            evaluation_slice_size=cfg.SLICE_SIZE,
+        ),
         random_seed=cfg.RANDOM_SEED,
         device=device,
     )
@@ -208,6 +353,14 @@ def train(
     # Los mapas entity_to_id y relation_to_id son compartidos entre modelos,
     # así que se guardan en MAPS_DIR (ya generados por fase 1)
     # No es necesario volver a guardarlos aquí
+
+    # Plots de diagnóstico: curva de loss + t-SNE de embeddings por tipo.
+    # Cada figura lleva en el nombre <modelo>_<timestamp> para que los
+    # entrenamientos sucesivos no se sobreescriban.
+    plot_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_figures_dir = cfg.OUT_DIR / "figures" / model_name.lower()
+    _plot_loss_curve(result, model_name, out_figures_dir, plot_ts)
+    _plot_tsne_embeddings(entity_embs, training, model_name, out_figures_dir, plot_ts)
 
     # Resumen de métricas de test
     metrics = result.metric_results.to_dict()

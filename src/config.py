@@ -121,7 +121,7 @@ BATCH_SIZE_EVAL = 1024
 SLICE_SIZE      = 5000
 
 # Early stopping (PyKEEN EarlyStopper). Activado en phase2.
-EARLY_STOP_FREQUENCY      = 10         # evaluar en validación cada N épocas
+EARLY_STOP_FREQUENCY      = 1         # evaluar en validación cada N épocas
 EARLY_STOP_PATIENCE       = 3         # nº de evaluaciones consecutivas sin mejora antes de parar
 EARLY_STOP_RELATIVE_DELTA = 0.002     # mejora relativa mínima para considerar progreso
 EARLY_STOP_METRIC         = "inverse_harmonic_mean_rank"  # MRR (mayor = mejor)
