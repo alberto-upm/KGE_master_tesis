@@ -106,18 +106,22 @@ ENTITY_EVAL_PAIRS = [
 # Hiperparámetros KGE 
 # ---------------------------------------------------------------------------
 
-EMBEDDING_DIM  = 256
-N_EPOCHS       = 50
+EMBEDDING_DIM  = 512 #256
+N_EPOCHS       = 100
 BATCH_SIZE     = 5500
 LEARNING_RATE  = 1e-3
 NEG_PER_POS    = 10 
 RANDOM_SEED    = 42
 
+LR_FACTOR      = 0.5
+LR_PATIENCE    = 10
+LR_MIN         = 1e-5
+
 BATCH_SIZE_EVAL = 1024
-SLICE_SIZE=5000
+SLICE_SIZE      = 5000
 
 # Early stopping (PyKEEN EarlyStopper). Activado en phase2.
-EARLY_STOP_FREQUENCY      = 1         # evaluar en validación cada N épocas
+EARLY_STOP_FREQUENCY      = 10         # evaluar en validación cada N épocas
 EARLY_STOP_PATIENCE       = 3         # nº de evaluaciones consecutivas sin mejora antes de parar
 EARLY_STOP_RELATIVE_DELTA = 0.002     # mejora relativa mínima para considerar progreso
 EARLY_STOP_METRIC         = "inverse_harmonic_mean_rank"  # MRR (mayor = mejor)

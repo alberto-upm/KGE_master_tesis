@@ -35,6 +35,9 @@ from pathlib import Path
 
 import torch
 
+import os
+os.environ["PYKEEN_NO_CUDA_OOM_DETECTION"] = "1"  # antes de importar pykeen
+
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
 
@@ -144,9 +147,17 @@ def train(
         model_kwargs=model_kwargs,
         optimizer="Adam",
         optimizer_kwargs=dict(lr=lr),
+        # Scheduler: reduce LR cuando el MRR se estanca
+        lr_scheduler="ReduceLROnPlateau",
+        lr_scheduler_kwargs=dict(
+            mode="max",
+            factor=cfg.LR_FACTOR,
+            patience=cfg.LR_PATIENCE,
+            min_lr=cfg.LR_MIN,
+        ),
         training_loop="sLCWA",
         training_loop_kwargs=dict(automatic_memory_optimization=False),
-        training_kwargs=dict(num_epochs=epochs, batch_size=batch, sub_batch_size=batch),
+        training_kwargs=dict(num_epochs=epochs, batch_size=batch, sub_batch_size=2048),
         loss=loss,
         loss_kwargs=loss_kwargs if loss_kwargs else None,
         negative_sampler=sampler,
@@ -201,10 +212,11 @@ def train(
     metrics = result.metric_results.to_dict()
     hits = metrics.get("both", {}).get("realistic", {})
     print(f"\n--- Métricas en test set ({model_name}) ---")
-    for k in ("hits_at_1", "hits_at_3", "hits_at_10", "mean_reciprocal_rank"):
+    for k in ("hits_at_1", "hits_at_3", "hits_at_10", "inverse_harmonic_mean_rank"):
         v = hits.get(k)
         if v is not None:
-            print(f"  {k}: {v:.4f}")
+            label = "mrr" if k == "inverse_harmonic_mean_rank" else k
+            print(f"  {label}: {v:.4f}")
 
     # Añadir fila al control de versiones (CSV/JSON acumulativos)
     _append_to_comparison_table(
@@ -280,6 +292,10 @@ def _append_to_comparison_table(
     metrics = result.metric_results.to_dict()
     hits    = metrics.get("both", {}).get("realistic", {})
 
+    # En PyKEEN moderno la clave canónica de MRR es "inverse_harmonic_mean_rank"
+    # ("mean_reciprocal_rank" sólo es alias y no aparece en to_dict()).
+    mrr = hits.get("inverse_harmonic_mean_rank", hits.get("mean_reciprocal_rank", 0.0))
+
     row = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "model":     model_name,
@@ -290,7 +306,7 @@ def _append_to_comparison_table(
         "hit@1":     round(hits.get("hits_at_1",  0.0), 4),
         "hit@3":     round(hits.get("hits_at_3",  0.0), 4),
         "hit@10":    round(hits.get("hits_at_10", 0.0), 4),
-        "mrr":       round(hits.get("mean_reciprocal_rank", 0.0), 4),
+        "mrr":       round(mrr, 4),
     }
 
     cfg.MODEL_COMPARISON_DIR.mkdir(parents=True, exist_ok=True)
@@ -335,7 +351,8 @@ def _print_session_summary(results: dict) -> None:
             "hit@1":   round(hits.get("hits_at_1",  0.0), 4),
             "hit@3":   round(hits.get("hits_at_3",  0.0), 4),
             "hit@10":  round(hits.get("hits_at_10", 0.0), 4),
-            "mrr":     round(hits.get("mean_reciprocal_rank", 0.0), 4),
+            "mrr":     round(hits.get("inverse_harmonic_mean_rank",
+                                       hits.get("mean_reciprocal_rank", 0.0)), 4),
         })
 
     print("\n" + "=" * 55)
