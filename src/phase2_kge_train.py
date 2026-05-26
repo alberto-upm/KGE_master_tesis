@@ -134,7 +134,7 @@ def train(
 
     print(f"\n[2/3] Entrenando {model_name}  "
           f"(dim={dim}, epochs={epochs}, loss={loss}, "
-          f"sampler={sampler}, device={device}, eval_batch={eval_batch_size}) ...")
+          f"sampler={sampler}, device={device}, eval_batch={cfg.BATCH_SIZE_EVAL}) ...")
     # print(f"      Early stopping: metric={cfg.EARLY_STOP_METRIC}  "
     #       f"freq={cfg.EARLY_STOP_FREQUENCY}  patience={cfg.EARLY_STOP_PATIENCE}  "
     #       f"delta={cfg.EARLY_STOP_RELATIVE_DELTA}")

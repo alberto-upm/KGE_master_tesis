@@ -106,7 +106,7 @@ ENTITY_EVAL_PAIRS = [
 # Hiperparámetros KGE 
 # ---------------------------------------------------------------------------
 
-EMBEDDING_DIM  = 512 #256
+EMBEDDING_DIM  = 256
 N_EPOCHS       = 100
 BATCH_SIZE     = 5500
 LEARNING_RATE  = 1e-3
