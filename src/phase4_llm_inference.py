@@ -29,7 +29,7 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
-from generate_corpus import PRED_TEMPLATES_ES
+from phase1b_generate_corpus import PRED_TEMPLATES_ES
 
 # ---------------------------------------------------------------------------
 # Prompt
@@ -321,7 +321,7 @@ def run(
 
     if interactive:
         # Cargar mapa de incidencias para obtener las propiedades
-        import generate_corpus as gc
+        import phase1b_generate_corpus as gc
         g        = gc.load_graph(cfg.TTL_FILE)
         inc_map  = gc.build_incident_map(g)
 

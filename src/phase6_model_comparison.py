@@ -231,7 +231,7 @@ def run_verbalization_integrity_check(
     """
     from phase3_link_prediction import load_model_by_name, predict_tails
     from phase4_llm_inference import KGEAugmentedLLM, extract_answer
-    from generate_corpus import PRED_TEMPLATES_ES
+    from phase1b_generate_corpus import PRED_TEMPLATES_ES
 
     print(f"\n[Integridad verbalización] Modelo: {model_name}, muestras: {n_samples}")
 

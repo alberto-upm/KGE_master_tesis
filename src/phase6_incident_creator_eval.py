@@ -101,7 +101,7 @@ def evaluate_kge(
     print("\n[Evaluación KGE] Cargando recursos ...")
 
     from rdflib import Graph
-    from generate_corpus import build_incident_map
+    from phase1b_generate_corpus import build_incident_map
     from phase3_link_prediction import load_model_by_name
 
     print(f"  Modelo KGE: {model_name}")
@@ -258,7 +258,7 @@ def evaluate_llm_faithfulness(
     Devuelve faithfulness score (fracción de valores mencionados).
     """
     from rdflib import Graph
-    from generate_corpus import build_incident_map
+    from phase1b_generate_corpus import build_incident_map
     from phase4_llm_inference import verbalize_props, KGEAugmentedLLM
 
     print("\n[Evaluación LLM] Cargando recursos ...")
