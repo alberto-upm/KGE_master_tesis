@@ -120,6 +120,13 @@ LR_MIN         = 1e-5
 BATCH_SIZE_EVAL = 1024
 SLICE_SIZE      = 5000
 
+# t-SNE: muestreo estratificado por tipo (hasta N entidades de cada tipo).
+# Coste aproximado del t-SNE en función del total muestreado (≈ 11 tipos):
+#   n_per_type=500   →   ~3-5k puntos   →  1-2 min
+#   n_per_type=2000  →  ~15-20k puntos  →  5-10 min
+#   n_per_type=5000  →  ~40-50k puntos  →  20-40 min
+TSNE_N_PER_TYPE = 2000
+
 # Early stopping (PyKEEN EarlyStopper). Activado en phase2.
 EARLY_STOP_FREQUENCY      = 1         # evaluar en validación cada N épocas
 EARLY_STOP_PATIENCE       = 3         # nº de evaluaciones consecutivas sin mejora antes de parar

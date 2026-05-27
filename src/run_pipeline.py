@@ -19,6 +19,7 @@ Uso:
   python src/run_pipeline.py --phase 2 --kge-model DistMult    # bilineal simétrico
   python src/run_pipeline.py --phase 2 --kge-model ComplEx     # bilineal asimétrico
   python src/run_pipeline.py --phase 2 --all-models            # entrena todos los modelos secuencialmente
+  python src/run_pipeline.py --phase 2_plots --kge-model TransE  # regenera loss + t-SNE de un modelo ya entrenado (sin reentrenar)
   python src/run_pipeline.py --phase 3                # link prediction (DistMult)
   python src/run_pipeline.py --phase 3 --kge-model ComplEx
   python src/run_pipeline.py --phase 5                # (sin ejecución standalone)
@@ -153,6 +154,12 @@ def run_phase2(epochs=None, dim=None, device=cfg.DEVICE, kge_model=None, all_mod
     )
 
 
+def run_phase2_plots(kge_model=None):
+    """Regenera loss curve + t-SNE de un modelo KGE ya entrenado."""
+    from phase2_plots import run
+    run(kge_model_name=kge_model or 'TransE')
+
+
 def run_phase3(top_k=None, kge_model=None):
     from phase3_link_prediction import run
     run(top_k=top_k or cfg.TOP_K_PREDICT, model_name=kge_model or 'TransE')
@@ -219,7 +226,7 @@ def main():
     parser.add_argument(
         "--phase",
         default="all",
-        choices=["all", "0", "1", "1b", "2", "3", "5", "6", "6_full",
+        choices=["all", "0", "1", "1b", "2", "2_plots", "3", "5", "6", "6_full",
                  "compare", "create_incident"],
         help="Fase a ejecutar (default: all)",
     )
@@ -283,6 +290,8 @@ def main():
                 epochs=args.epochs, dim=args.dim, device=args.device,
                 kge_model=args.kge_model, all_models=args.all_models,
             )
+        elif p == "2_plots":
+            run_phase2_plots(kge_model=args.kge_model)
         elif p == "3":
             run_phase3(top_k=args.top_k, kge_model=args.kge_model)
         elif p == "5":

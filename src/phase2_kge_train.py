@@ -84,12 +84,10 @@ def _model_config(model_lower: str, dim: int, margin: float) -> dict:
         # TransH: proyecta entidades en hiperplanos específicos por relación
         "transh":   {**nssa, "model_kwargs": dict(embedding_dim=dim)},
         # HAKE: módulo captura nivel jerárquico, fase captura diferencia semántica
-        "hake":     {**nssa, "model_kwargs": dict(embedding_dim=dim),
-                     "sampler": "basic"},
-        "distmult": {**bce,  "model_kwargs": dict(embedding_dim=dim)},
-        # ComplEx: embeddings complejos (dim × 2 en RAM) → eval_batch más pequeño
-        "complex":  {**bce,  "model_kwargs": dict(embedding_dim=dim),
-                     "eval_batch_size": 8},
+        "hake":     {**nssa, "model_kwargs": dict(embedding_dim=dim)},
+        "distmult": {**nssa,  "model_kwargs": dict(embedding_dim=dim)},
+        # ComplEx: 
+        "complex":  {**nssa,  "model_kwargs": dict(embedding_dim=dim)},
     }
     if model_lower not in configs:
         # Fallback genérico para cualquier otro modelo de PyKEEN
@@ -98,147 +96,18 @@ def _model_config(model_lower: str, dim: int, margin: float) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Plots de diagnóstico (curva de loss + t-SNE de embeddings)
+# Plots de diagnóstico
+# ---------------------------------------------------------------------------
+# Las funciones de plot viven en phase2_plots.py. Aquí solo se importan.
+#   _plot_loss_curve              curva de pérdida
+#   _plot_tsne_embeddings_random  t-SNE con muestreo aleatorio uniforme
+#                                 (la que usamos al final de train(): refleja
+#                                  la distribución real del grafo)
+# La variante estratificada (_plot_tsne_embeddings) se invoca desde
+# phase2_plots.py vía CLI cuando quieras regenerar plots a posteriori.
 # ---------------------------------------------------------------------------
 
-def _entity_type(label: str) -> str:
-    """Clasifica una entidad por prefijo de su label."""
-    prefixes = {
-        "incident_":       "incident",
-        "intervention_":   "intervention",
-        "company":         "company",
-        "employee":        "employee",
-        "supportGroup":    "supportGroup",
-        "supportTeam":     "supportTeam",
-        "supportCategory": "supportCategory",
-        "statusIncident":  "status",
-        "typeIncident":    "type",
-        "incidentOrigin":  "origin",
-        "person_":         "person",
-    }
-    for pref, etype in prefixes.items():
-        if label.startswith(pref):
-            return etype
-    return "other"
-
-
-_TYPE_COLORS = {
-    "incident":        "#1f77b4",
-    "intervention":    "#bcbd22",
-    "company":         "#ff7f0e",
-    "employee":        "#2ca02c",
-    "supportGroup":    "#d62728",
-    "supportTeam":     "#9467bd",
-    "supportCategory": "#17becf",
-    "status":          "#8c564b",
-    "type":            "#e377c2",
-    "origin":          "#7f7f7f",
-    "person":          "#aec7e8",
-    "other":           "#cccccc",
-}
-
-
-def _plot_loss_curve(
-    result,
-    model_name: str,
-    out_dir: Path,
-    timestamp: str,
-) -> None:
-    """
-    Guarda la curva de loss en
-      out_dir/loss_curve_<modelo>_<timestamp>.png
-    """
-    try:
-        import matplotlib
-        matplotlib.use("Agg")  # backend sin display (servidor)
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("      [!] matplotlib no instalado; se omite plot de loss.")
-        return
-
-    losses = getattr(result, "losses", None) or []
-    if not losses:
-        print("      [!] No hay losses registradas en el resultado.")
-        return
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"loss_curve_{model_name.lower()}_{timestamp}.png"
-
-    plt.figure(figsize=(8, 4))
-    plt.plot(range(1, len(losses) + 1), losses, marker="o", color="steelblue")
-    plt.title(f"Curva de pérdida — {model_name}")
-    plt.xlabel("Época")
-    plt.ylabel("Loss")
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=120)
-    plt.close()
-    print(f"      Loss curve → {out_path}")
-
-
-def _plot_tsne_embeddings(
-    entity_embs,
-    factory,
-    model_name: str,
-    out_dir: Path,
-    timestamp: str,
-    n_sample: int = 2000,
-    seed: int = 42,
-) -> None:
-    """
-    Guarda un t-SNE 2D de los embeddings de entidades en
-      out_dir/tsne_entities_<modelo>_<timestamp>.png
-    coloreado por tipo (incident, company, employee, supportGroup, ...).
-    """
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        from sklearn.manifold import TSNE
-        import numpy as np
-    except ImportError as e:
-        print(f"      [!] Falta dependencia para t-SNE ({e}); se omite.")
-        return
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"tsne_entities_{model_name.lower()}_{timestamp}.png"
-
-    embs_np = entity_embs.detach().cpu().numpy() if hasattr(entity_embs, "detach") \
-        else np.asarray(entity_embs)
-    # Para embeddings complejos (RotatE/ComplEx), proyectamos la parte real
-    if np.iscomplexobj(embs_np):
-        embs_np = embs_np.real
-
-    n_total = embs_np.shape[0]
-    n = min(n_sample, n_total)
-    rng = np.random.default_rng(seed)
-    idx = rng.choice(n_total, n, replace=False)
-    sample = embs_np[idx]
-
-    id_to_label = {v: k for k, v in factory.entity_to_id.items()}
-    labels = [id_to_label.get(int(i), "other") for i in idx]
-    types  = [_entity_type(l) for l in labels]
-
-    print(f"      Calculando t-SNE sobre {n:,} entidades ...")
-    tsne = TSNE(n_components=2, random_state=seed, perplexity=30,
-                init="pca", learning_rate="auto")
-    embs_2d = tsne.fit_transform(sample)
-
-    plt.figure(figsize=(12, 8))
-    for etype, color in _TYPE_COLORS.items():
-        mask = [i for i, t in enumerate(types) if t == etype]
-        if mask:
-            plt.scatter(
-                embs_2d[mask, 0], embs_2d[mask, 1],
-                c=color, label=f"{etype} ({len(mask)})",
-                alpha=0.6, s=15,
-            )
-    plt.title(f"t-SNE de embeddings — {model_name}  (n={n:,})", fontsize=13)
-    plt.legend(bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=9)
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=120, bbox_inches="tight")
-    plt.close()
-    print(f"      t-SNE      → {out_path}")
+from phase2_plots import _plot_loss_curve, _plot_tsne_embeddings_random
 
 
 def train(
@@ -364,13 +233,17 @@ def train(
     # así que se guardan en MAPS_DIR (ya generados por fase 1)
     # No es necesario volver a guardarlos aquí
 
-    # Plots de diagnóstico: curva de loss + t-SNE de embeddings por tipo.
-    # Cada figura lleva en el nombre <modelo>_<timestamp> para que los
-    # entrenamientos sucesivos no se sobreescriban.
+    # Plots de diagnóstico: curva de loss + t-SNE aleatorio (refleja la
+    # distribución real del grafo). Cada figura lleva en el nombre
+    # <modelo>_<timestamp> para que los entrenamientos sucesivos no se
+    # sobreescriban. Para la versión estratificada (balanceada por tipo)
+    # usa `python src/phase2_plots.py --kge-model <X>`.
     plot_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_figures_dir = cfg.OUT_DIR / "figures" / model_name.lower()
     _plot_loss_curve(result, model_name, out_figures_dir, plot_ts)
-    _plot_tsne_embeddings(entity_embs, training, model_name, out_figures_dir, plot_ts)
+    _plot_tsne_embeddings_random(
+        entity_embs, training, model_name, out_figures_dir, plot_ts,
+    )
 
     # Resumen de métricas de test
     metrics = result.metric_results.to_dict()
