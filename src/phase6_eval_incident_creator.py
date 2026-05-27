@@ -142,14 +142,19 @@ def evaluate_pipeline(
     print(f"\n[4/4] Evaluando {len(inc_ids):,} incidencias  (top_k={max_k}) ...")
 
     # --- Acumuladores por propiedad ---
+    # hit[k] = pipeline completo (rule_hit cuenta como rank=1).
+    # kge_hit[k] = sólo aciertos llegados vía KGE+CBR (breakdown informativo).
     per_prop: dict[str, dict] = defaultdict(lambda: {
         "n_evaluated": 0,
         "n_skipped":   0,
         "rule_hit":    0,
         "rule_miss":   0,
         "kge_hit":     {k: 0 for k in top_k_values},
+        "hit":         {k: 0 for k in top_k_values},
         "fail":        0,
-        "rr_sum":      0.0,   # para MRR sobre los pasos que llegan a KGE+CBR
+        "rr_sum":      0.0,    # MRR del pipeline completo
+        "rr_sum_kge":  0.0,    # MRR sobre los pasos que pasaron por KGE+CBR
+        "n_kge_steps": 0,      # nº de pasos que llegaron a KGE+CBR
     })
 
     prediction_rows: list[dict] = []
@@ -183,7 +188,8 @@ def evaluate_pipeline(
             stats["n_evaluated"] += 1
 
             outcome:     str          = ""
-            rank:        int | None   = None
+            kge_rank:    int | None   = None
+            final_rank:  int | None   = None
             rule_id:     str | None   = None
             rule_value:  str | None   = None
 
@@ -194,7 +200,8 @@ def evaluate_pipeline(
                 rule_id    = rule_hit.get("rule_id")
                 if rule_value == true_value:
                     stats["rule_hit"] += 1
-                    outcome = "rule_hit"
+                    outcome    = "rule_hit"
+                    final_rank = 1
                 else:
                     stats["rule_miss"] += 1
                     # No marcamos como hit; la cascada cae a KGE+CBR
@@ -210,17 +217,26 @@ def evaluate_pipeline(
                     top_k=max_k,
                 )
                 rec_entities = [ent for ent, *_ in recs]
+                stats["n_kge_steps"] += 1
 
                 if true_value in rec_entities:
-                    rank = rec_entities.index(true_value) + 1
+                    kge_rank   = rec_entities.index(true_value) + 1
+                    final_rank = kge_rank
                     for k in top_k_values:
-                        if rank <= k:
+                        if kge_rank <= k:
                             stats["kge_hit"][k] += 1
-                    stats["rr_sum"] += 1.0 / rank
+                    stats["rr_sum_kge"] += 1.0 / kge_rank
                     outcome = "kge_hit"
                 else:
                     stats["fail"] += 1
                     outcome = "fail"
+
+            # --- Hits y MRR del pipeline completo (rule_hit cuenta como rank=1) ---
+            if final_rank is not None:
+                for k in top_k_values:
+                    if final_rank <= k:
+                        stats["hit"][k] += 1
+                stats["rr_sum"] += 1.0 / final_rank
 
             # --- Avanzar con el ground truth (golden path) ---
             known_props[prop] = true_value
@@ -232,10 +248,12 @@ def evaluate_pipeline(
                 "outcome":    outcome,
                 "rule_id":    rule_id or "",
                 "rule_value": rule_value or "",
-                "rank":       rank if rank is not None else "",
-                **{f"hit@{k}": 1 if (rank is not None and rank <= k) else 0
+                "rank":       final_rank if final_rank is not None else "",
+                "kge_rank":   kge_rank if kge_rank is not None else "",
+                **{f"hit@{k}": 1 if (final_rank is not None and final_rank <= k) else 0
                    for k in top_k_values},
-                "rule_correct": 1 if outcome == "rule_hit" else 0,
+                "reciprocal_rank": round(1.0 / final_rank, 4) if final_rank else 0.0,
+                "rule_correct":    1 if outcome == "rule_hit" else 0,
             })
 
     return per_prop, prediction_rows
@@ -247,32 +265,35 @@ def evaluate_pipeline(
 
 def _compute_metrics(per_prop: dict, top_k_values: tuple[int, ...]) -> dict:
     """
-    Calcula métricas derivadas por propiedad y globales:
-      accuracy@k = (rule_hit + kge_hit@k) / n_evaluated
+    Métricas por propiedad y globales del pipeline REGLA → KGE+CBR.
+
+      hit@k         = (rule_hit + kge_hit@k) / n_evaluated     [Hit@k full pipeline]
+      mrr           = rr_sum / n_evaluated                      [rule_hit ↔ rank=1]
+      kge_hit@k     = aciertos vía KGE en top-k                  [breakdown]
+      mrr_kge       = rr_sum_kge / n_kge_steps                   [breakdown]
       rule_coverage = (rule_hit + rule_miss) / n_evaluated
-      rule_precision = rule_hit / (rule_hit + rule_miss)
-      mrr_kge = rr_sum / (rule_miss + fail + kge_hit_total)
-                (rank reciprocal entre los pasos que pasaron por KGE+CBR)
+      rule_precision= rule_hit / (rule_hit + rule_miss)
     """
     summary = {"per_property": {}, "global": {}}
 
-    # Acumuladores globales
-    g_eval     = 0
-    g_skipped  = 0
-    g_rule_hit = 0
-    g_rule_miss = 0
-    g_kge_hit  = {k: 0 for k in top_k_values}
-    g_fail     = 0
-    g_rr_sum   = 0.0
+    g_eval        = 0
+    g_skipped     = 0
+    g_rule_hit    = 0
+    g_rule_miss   = 0
+    g_kge_hit     = {k: 0 for k in top_k_values}
+    g_hit         = {k: 0 for k in top_k_values}
+    g_fail        = 0
+    g_rr_sum      = 0.0
+    g_rr_sum_kge  = 0.0
+    g_kge_steps   = 0
 
     for prop in EVAL_PROPS:
         s = per_prop.get(prop)
         if s is None or s["n_evaluated"] == 0:
             continue
 
-        n = s["n_evaluated"]
-        # Pasos que llegaron a KGE+CBR: cada uno termina en kge_hit@max_k o en fail
-        kge_steps = s["kge_hit"][max(top_k_values)] + s["fail"]
+        n         = s["n_evaluated"]
+        kge_steps = s["n_kge_steps"]
 
         prop_metrics = {
             "n_evaluated":   n,
@@ -281,29 +302,31 @@ def _compute_metrics(per_prop: dict, top_k_values: tuple[int, ...]) -> dict:
             "rule_miss":     s["rule_miss"],
             "fail":          s["fail"],
             "kge_hit":       {k: s["kge_hit"][k] for k in top_k_values},
-            "accuracy":      {
-                k: round((s["rule_hit"] + s["kge_hit"][k]) / n, 4) for k in top_k_values
-            },
+            "hit":           {k: s["hit"][k]     for k in top_k_values},
+            "hit_rate":      {k: round(s["hit"][k] / n, 4) for k in top_k_values},
+            "mrr":           round(s["rr_sum"] / n, 4),
+            "mrr_kge":       round(s["rr_sum_kge"] / kge_steps, 4) if kge_steps else 0.0,
             "rule_coverage":  round((s["rule_hit"] + s["rule_miss"]) / n, 4),
             "rule_precision": (
                 round(s["rule_hit"] / (s["rule_hit"] + s["rule_miss"]), 4)
                 if (s["rule_hit"] + s["rule_miss"]) > 0 else None
             ),
-            "mrr_kge":       round(s["rr_sum"] / kge_steps, 4) if kge_steps else 0.0,
         }
         summary["per_property"][prop] = prop_metrics
 
-        g_eval     += n
-        g_skipped  += s["n_skipped"]
-        g_rule_hit += s["rule_hit"]
-        g_rule_miss += s["rule_miss"]
-        g_fail     += s["fail"]
-        g_rr_sum   += s["rr_sum"]
+        g_eval       += n
+        g_skipped    += s["n_skipped"]
+        g_rule_hit   += s["rule_hit"]
+        g_rule_miss  += s["rule_miss"]
+        g_fail       += s["fail"]
+        g_rr_sum     += s["rr_sum"]
+        g_rr_sum_kge += s["rr_sum_kge"]
+        g_kge_steps  += s["n_kge_steps"]
         for k in top_k_values:
             g_kge_hit[k] += s["kge_hit"][k]
+            g_hit[k]     += s["hit"][k]
 
     if g_eval > 0:
-        g_kge_steps = g_kge_hit[max(top_k_values)] + g_fail
         summary["global"] = {
             "n_evaluated":   g_eval,
             "n_skipped":     g_skipped,
@@ -311,15 +334,15 @@ def _compute_metrics(per_prop: dict, top_k_values: tuple[int, ...]) -> dict:
             "rule_miss":     g_rule_miss,
             "fail":          g_fail,
             "kge_hit":       g_kge_hit,
-            "accuracy":      {
-                k: round((g_rule_hit + g_kge_hit[k]) / g_eval, 4) for k in top_k_values
-            },
+            "hit":           g_hit,
+            "hit_rate":      {k: round(g_hit[k] / g_eval, 4) for k in top_k_values},
+            "mrr":           round(g_rr_sum / g_eval, 4),
+            "mrr_kge":       round(g_rr_sum_kge / g_kge_steps, 4) if g_kge_steps else 0.0,
             "rule_coverage":  round((g_rule_hit + g_rule_miss) / g_eval, 4),
             "rule_precision": (
                 round(g_rule_hit / (g_rule_hit + g_rule_miss), 4)
                 if (g_rule_hit + g_rule_miss) > 0 else None
             ),
-            "mrr_kge":       round(g_rr_sum / g_kge_steps, 4) if g_kge_steps else 0.0,
         }
 
     return summary
@@ -352,25 +375,27 @@ def _print_results(
     print(f"    coverage    : {g['rule_coverage']:.4f}")
     if g["rule_precision"] is not None:
         print(f"    precision   : {g['rule_precision']:.4f}")
-    print(f"  Pipeline completo (regla + KGE+CBR):")
+    print(f"  Pipeline completo (regla cuenta como rank=1):")
     for k in top_k_values:
-        print(f"    accuracy@{k:<3}: {g['accuracy'][k]:.4f}")
-    print(f"    MRR (KGE)   : {g['mrr_kge']:.4f}")
+        print(f"    Hit@{k:<3}     : {g['hit_rate'][k]:.4f}")
+    print(f"    MRR         : {g['mrr']:.4f}")
+    print(f"    MRR (KGE)   : {g['mrr_kge']:.4f}   (solo pasos que llegaron a KGE)")
 
     print(f"\n  Desglose por propiedad:")
     header = (f"  {'Propiedad':<26} {'N':>5} "
               f"{'RH':>5} {'RM':>5} {'FAIL':>5} "
-              + " ".join(f"{'A@'+str(k):>6}" for k in top_k_values))
+              + " ".join(f"{'H@'+str(k):>6}" for k in top_k_values)
+              + f" {'MRR':>6}")
     print(header)
     print("  " + "-" * (len(header) - 2))
     for prop in EVAL_PROPS:
         pm = summary["per_property"].get(prop)
         if not pm:
             continue
-        acc_cols = " ".join(f"{pm['accuracy'][k]:>6.3f}" for k in top_k_values)
+        hit_cols = " ".join(f"{pm['hit_rate'][k]:>6.3f}" for k in top_k_values)
         print(f"  {prop:<26} {pm['n_evaluated']:>5} "
               f"{pm['rule_hit']:>5} {pm['rule_miss']:>5} {pm['fail']:>5} "
-              f"{acc_cols}")
+              f"{hit_cols} {pm['mrr']:>6.3f}")
     print(f"{'='*70}\n")
 
 
@@ -399,8 +424,9 @@ def _save_results(
     # CSV por propiedad
     pp_path = out_dir / "per_property.csv"
     fieldnames = (["property", "n_evaluated", "n_skipped", "rule_hit", "rule_miss",
-                   "fail", "rule_coverage", "rule_precision", "mrr_kge"]
-                  + [f"accuracy@{k}" for k in top_k_values]
+                   "fail", "rule_coverage", "rule_precision", "mrr", "mrr_kge"]
+                  + [f"hit@{k}"     for k in top_k_values]
+                  + [f"hit_rate@{k}" for k in top_k_values]
                   + [f"kge_hit@{k}"  for k in top_k_values])
     with open(pp_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -418,10 +444,12 @@ def _save_results(
                 "fail":           pm["fail"],
                 "rule_coverage":  pm["rule_coverage"],
                 "rule_precision": pm["rule_precision"] if pm["rule_precision"] is not None else "",
+                "mrr":            pm["mrr"],
                 "mrr_kge":        pm["mrr_kge"],
             }
             for k in top_k_values:
-                row[f"accuracy@{k}"] = pm["accuracy"][k]
+                row[f"hit@{k}"]      = pm["hit"][k]
+                row[f"hit_rate@{k}"] = pm["hit_rate"][k]
                 row[f"kge_hit@{k}"]  = pm["kge_hit"][k]
             writer.writerow(row)
 

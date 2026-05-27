@@ -177,7 +177,7 @@ def run_model_comparison(models=None, n_samples=None,
     )
 
 
-def run_create_incident(kge_model=None, llm_model=None, no_llm=False, top_k=5):
+def run_create_incident(kge_model=None, llm_model=None, no_llm=False, top_k=10):
     from phase4_incident_creator import run
     run(
         kge_model_name=kge_model or 'TransE',

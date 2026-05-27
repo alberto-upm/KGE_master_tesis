@@ -27,6 +27,7 @@ Desde el pipeline:
 import argparse
 import json
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -286,7 +287,7 @@ class IncidentCreatorSession:
         kge_model_name: str = 'TransE',
         use_llm: bool = True,
         llm_model_name: str = cfg.DEFAULT_MODEL,
-        top_k: int = 5,
+        top_k: int = 10,
     ):
         self.kge_model_name  = kge_model_name
         self.llm_model_name  = llm_model_name
@@ -536,6 +537,7 @@ class IncidentCreatorSession:
         # Trazabilidad: {prop → {"value", "source", ...}}
         sources: dict[str, dict] = {}
         self._sources = sources
+        self._session_start = time.monotonic()
 
         print("=== Creación de nueva incidencia ===\n")
 
@@ -828,17 +830,12 @@ class IncidentCreatorSession:
         _sources["createdOn"] = {"value": today_str, "source": "AUTO"}
         print(f"\n[AUTO] Fecha de creación = {today_str}")
 
-        try:
-            raw_time = input("Tiempo dedicado (minutos, Enter para 0) > ").strip()
-        except (EOFError, KeyboardInterrupt):
-            raw_time = ""
-        try:
-            dedication_min = int(raw_time) if raw_time else 0
-        except ValueError:
-            dedication_min = 0
+        start = getattr(self, "_session_start", None)
+        elapsed_sec = (time.monotonic() - start) if start is not None else 0.0
+        dedication_min = max(1, round(elapsed_sec / 60)) if elapsed_sec > 0 else 0
         incident["hasDedicationTimeMin"] = dedication_min
-        _sources["hasDedicationTimeMin"] = {"value": dedication_min, "source": "USUARIO"}
-        print(f"[OK]   Tiempo dedicado = {dedication_min} min")
+        _sources["hasDedicationTimeMin"] = {"value": dedication_min, "source": "AUTO"}
+        print(f"[AUTO] Tiempo dedicado = {dedication_min} min")
 
         filled = {k: v for k, v in incident.items() if v is not None}
         n_filled = len(filled)
@@ -913,7 +910,7 @@ def run(
     kge_model_name: str = 'TransE',
     use_llm: bool = True,
     llm_model_name: str = cfg.DEFAULT_MODEL,
-    top_k: int = 5,
+    top_k: int = 10,
 ) -> dict:
     session = IncidentCreatorSession(
         kge_model_name=kge_model_name,
@@ -934,8 +931,8 @@ if __name__ == "__main__":
                         help="Desactivar LLM (menú numerado clásico)")
     parser.add_argument("--model", default=cfg.DEFAULT_MODEL,
                         help=f"Modelo LLM (default: {cfg.DEFAULT_MODEL})")
-    parser.add_argument("--top-k", type=int, default=5,
-                        help="Recomendaciones KGE por propiedad (default: 5)")
+    parser.add_argument("--top-k", type=int, default=10,
+                        help="Recomendaciones KGE por propiedad (default: 10)")
     args = parser.parse_args()
 
     run(
