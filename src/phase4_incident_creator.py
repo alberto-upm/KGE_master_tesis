@@ -132,20 +132,77 @@ def extract_from_free_text(text: str, incidents_map: dict) -> dict[str, str]:
 # CBR: búsqueda de incidencias históricas similares
 # ---------------------------------------------------------------------------
 
-def find_matching_incidents(known_props: dict, incidents_map: dict) -> list[str]:
+def build_incidents_index(incidents_map: dict) -> dict[str, dict[str, set]]:
+    """
+    Construye un índice inverso {prop: {value: set(inc_ids)}} a partir de
+    incidents_map = {inc_id: {prop: [values]}}. Permite que
+    find_matching_incidents pase de un O(N·P) por consulta a una unión de
+    conjuntos (≈100× sobre un pool de cientos de miles de incidencias).
+
+    Construir el índice es O(N·P) una sola vez; luego cada consulta es
+    proporcional al nº de incidencias que comparten algún valor con
+    known_props, no al pool completo.
+    """
+    index: dict[str, dict[str, set]] = {}
+    for inc_id, props in incidents_map.items():
+        for prop, values in props.items():
+            if not values:
+                continue
+            bucket = index.setdefault(prop, {})
+            if isinstance(values, list):
+                for v in values:
+                    bucket.setdefault(v, set()).add(inc_id)
+            else:
+                bucket.setdefault(values, set()).add(inc_id)
+    return index
+
+
+def find_matching_incidents(
+    known_props: dict,
+    incidents_map: dict,
+    index: dict | None = None,
+    exclude_id: str | None = None,
+) -> list[str]:
     """
     Devuelve las incident_ids cuyas propiedades coinciden con known_props.
     Empieza exigiendo que TODAS las propiedades conocidas coincidan; si
     obtiene menos de 3 resultados, relaja el umbral en 1 hasta mínimo 1.
+
+    Si se pasa `index` (construido con build_incidents_index) se usa la ruta
+    rápida basada en intersección de conjuntos; en caso contrario hace el
+    barrido O(N) sobre `incidents_map`.
+    `exclude_id` permite descartar una incidencia (típicamente la objetivo
+    en evaluación) sin tener que copiar el pool.
     """
+    from collections import Counter
+
     filled = {k: v for k, v in known_props.items() if v is not None}
     if not filled:
         return []
+
+    # --- Ruta rápida con índice inverso -----------------------------------
+    if index is not None:
+        counter: Counter = Counter()
+        for k, v in filled.items():
+            ids = index.get(k, {}).get(v)
+            if ids:
+                counter.update(ids)
+        if exclude_id is not None:
+            counter.pop(exclude_id, None)
+        matches: list[str] = []
+        for threshold in range(len(filled), 0, -1):
+            matches = [iid for iid, c in counter.items() if c >= threshold]
+            if len(matches) >= 3:
+                return matches
+        return matches
+
+    # --- Ruta original (escaneo lineal) -----------------------------------
     matches = []
     for threshold in range(len(filled), 0, -1):
         matches = [
             inc_id for inc_id, props in incidents_map.items()
-            if sum(1 for k, v in filled.items() if v in props.get(k, [])) >= threshold
+            if inc_id != exclude_id
+            and sum(1 for k, v in filled.items() if v in props.get(k, [])) >= threshold
         ]
         if len(matches) >= 3:
             return matches
@@ -166,6 +223,8 @@ def recommend_property(
     rrf_k: float = cfg.RRF_K,
     w_kge: float = cfg.W_KGE,
     w_cbr: float = cfg.W_CBR,
+    index: dict | None = None,
+    exclude_id: str | None = None,
 ) -> tuple[list[tuple[str, int, float, float]], int]:
     """
     Genera recomendaciones para target_prop combinando CBR + KGE mediante
@@ -184,14 +243,16 @@ def recommend_property(
     """
     from phase3_link_prediction import predict_tails, predict_heads
 
-    proxies = find_matching_incidents(known_props, incidents_map)
+    proxies = find_matching_incidents(known_props, incidents_map,
+                                      index=index, exclude_id=exclude_id)
 
     if not proxies:
         first_prop = next((k for k, v in known_props.items() if v is not None), None)
         if first_prop:
             heads = predict_heads(model, factory, first_prop,
                                   known_props[first_prop], top_k=20)
-            proxies = [h for h, _ in heads if h in incidents_map]
+            proxies = [h for h, _ in heads
+                       if h in incidents_map and h != exclude_id]
 
     if not proxies:
         return [], 0

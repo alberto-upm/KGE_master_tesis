@@ -58,6 +58,7 @@ from phase4_incident_creator import (
     INCIDENT_PROPS,
     MULTI_VALUE_PROPS,
     _build_incidents_map_from_tsv,
+    build_incidents_index,
     recommend_property,
 )
 from rule_engine_pyclause import RuleEnginePyClause
@@ -183,6 +184,10 @@ def evaluate_pipeline(
     print("\n[1/4] Cargando pool CBR desde train.tsv ...")
     incidents_map = _build_incidents_map_from_tsv()
     print(f"      Pool CBR: {len(incidents_map):,} incidencias")
+    print("      Construyendo índice inverso del pool ...")
+    cbr_index = build_incidents_index(incidents_map)
+    n_entries = sum(len(b) for b in cbr_index.values())
+    print(f"      Índice listo: {len(cbr_index)} predicados, {n_entries:,} entradas")
 
     print(f"\n[2/4] Cargando incidencias de evaluación desde {eval_jsonl} ...")
     test_incidents = _load_eval_jsonl(eval_jsonl)
@@ -244,8 +249,9 @@ def evaluate_pipeline(
                 if up_val and up_val != SKIP_MARK:
                     known_props[up_prop] = up_val
 
-            # Excluir la incidencia objetivo del pool CBR para no contaminar
-            cbr_pool = {k: v for k, v in incidents_map.items() if k != inc_id}
+            # No copiamos el pool; pasamos `exclude_id` y el índice inverso
+            # a recommend_property para descartar la incidencia objetivo sin
+            # duplicar el dict de 369k entradas en cada paso.
 
             for prop in EVAL_PROPS:
                 # Las propiedades aportadas por el usuario no se evalúan.
@@ -291,10 +297,12 @@ def evaluate_pipeline(
                     recs, _n_proxies = recommend_property(
                         known_props=known_props,
                         target_prop=prop,
-                        incidents_map=cbr_pool,
+                        incidents_map=incidents_map,
                         model=model,
                         factory=factory,
                         top_k=max_k,
+                        index=cbr_index,
+                        exclude_id=inc_id,
                     )
                     rec_entities = [ent for ent, *_ in recs]
                     stats["n_kge_steps"] += 1
@@ -432,51 +440,64 @@ def _compute_metrics(per_prop: dict, top_k_values: tuple[int, ...]) -> dict:
 # Salida por consola
 # ---------------------------------------------------------------------------
 
-def _print_results(
+def _format_results(
     summary: dict,
     kge_model_name: str,
     top_k_values: tuple[int, ...],
-) -> None:
+) -> str:
+    """Construye el texto del bloque de resultados (para imprimir y/o guardar)."""
     g = summary.get("global", {})
     if not g:
-        print("\n[!] Sin resultados.")
-        return
+        return "\n[!] Sin resultados.\n"
 
-    print(f"\n{'='*70}")
-    print(f"  Resultados — {kge_model_name}")
-    print(f"  Campos evaluados: {g['n_evaluated']:,}   "
-          f"saltados: {g['n_skipped']:,}")
-    print(f"{'='*70}")
-    print(f"  Cascada:")
-    print(f"    rule_hit    : {g['rule_hit']:>7,}   ({g['rule_hit']/g['n_evaluated']:.2%})")
-    print(f"    rule_miss   : {g['rule_miss']:>7,}   ({g['rule_miss']/g['n_evaluated']:.2%})")
-    print(f"    fail        : {g['fail']:>7,}   ({g['fail']/g['n_evaluated']:.2%})")
-    print(f"  Reglas:")
-    print(f"    coverage    : {g['rule_coverage']:.4f}")
+    lines: list[str] = []
+    lines.append(f"\n{'='*70}")
+    lines.append(f"  Resultados — {kge_model_name}")
+    lines.append(f"  Campos evaluados: {g['n_evaluated']:,}   "
+                 f"saltados: {g['n_skipped']:,}")
+    lines.append(f"{'='*70}")
+    lines.append(f"  Cascada:")
+    lines.append(f"    rule_hit    : {g['rule_hit']:>7,}   ({g['rule_hit']/g['n_evaluated']:.2%})")
+    lines.append(f"    rule_miss   : {g['rule_miss']:>7,}   ({g['rule_miss']/g['n_evaluated']:.2%})")
+    lines.append(f"    fail        : {g['fail']:>7,}   ({g['fail']/g['n_evaluated']:.2%})")
+    lines.append(f"  Reglas:")
+    lines.append(f"    coverage    : {g['rule_coverage']:.4f}")
     if g["rule_precision"] is not None:
-        print(f"    precision   : {g['rule_precision']:.4f}")
-    print(f"  Pipeline completo (regla cuenta como rank=1):")
+        lines.append(f"    precision   : {g['rule_precision']:.4f}")
+    lines.append(f"  Pipeline completo (regla cuenta como rank=1):")
     for k in top_k_values:
-        print(f"    Hit@{k:<3}     : {g['hit_rate'][k]:.4f}")
-    print(f"    MRR         : {g['mrr']:.4f}")
-    print(f"    MRR (KGE)   : {g['mrr_kge']:.4f}   (solo pasos que llegaron a KGE)")
+        lines.append(f"    Hit@{k:<3}     : {g['hit_rate'][k]:.4f}")
+    lines.append(f"    MRR         : {g['mrr']:.4f}")
+    lines.append(f"    MRR (KGE)   : {g['mrr_kge']:.4f}   (solo pasos que llegaron a KGE)")
 
-    print(f"\n  Desglose por propiedad:")
+    lines.append(f"\n  Desglose por propiedad:")
     header = (f"  {'Propiedad':<26} {'N':>5} "
               f"{'RH':>5} {'RM':>5} {'FAIL':>5} "
               + " ".join(f"{'H@'+str(k):>6}" for k in top_k_values)
               + f" {'MRR':>6}")
-    print(header)
-    print("  " + "-" * (len(header) - 2))
+    lines.append(header)
+    lines.append("  " + "-" * (len(header) - 2))
     for prop in EVAL_PROPS:
         pm = summary["per_property"].get(prop)
         if not pm:
             continue
         hit_cols = " ".join(f"{pm['hit_rate'][k]:>6.3f}" for k in top_k_values)
-        print(f"  {prop:<26} {pm['n_evaluated']:>5} "
-              f"{pm['rule_hit']:>5} {pm['rule_miss']:>5} {pm['fail']:>5} "
-              f"{hit_cols} {pm['mrr']:>6.3f}")
-    print(f"{'='*70}\n")
+        lines.append(f"  {prop:<26} {pm['n_evaluated']:>5} "
+                     f"{pm['rule_hit']:>5} {pm['rule_miss']:>5} {pm['fail']:>5} "
+                     f"{hit_cols} {pm['mrr']:>6.3f}")
+    lines.append(f"{'='*70}\n")
+    return "\n".join(lines)
+
+
+def _print_results(
+    summary: dict,
+    kge_model_name: str,
+    top_k_values: tuple[int, ...],
+) -> str:
+    """Imprime el bloque de resultados y devuelve su contenido como string."""
+    text = _format_results(summary, kge_model_name, top_k_values)
+    print(text)
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -489,8 +510,17 @@ def _save_results(
     prediction_rows: list[dict],
     kge_model_name: str,
     top_k_values: tuple[int, ...],
+    results_text: str | None = None,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Texto formateado (igual al que se imprime por pantalla)
+    txt_path = out_dir / "results.txt"
+    text = (results_text
+            if results_text is not None
+            else _format_results(summary, kge_model_name, top_k_values))
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write(text)
 
     # JSON con todo
     json_path = out_dir / "results.json"
@@ -541,6 +571,7 @@ def _save_results(
             writer.writeheader()
             writer.writerows(prediction_rows)
 
+    print(f"  Resultados TXT   → {txt_path}")
     print(f"  Resultados JSON  → {json_path}")
     print(f"  Por propiedad    → {pp_path}")
     print(f"  Predicciones     → {pred_path}")
@@ -568,8 +599,9 @@ def run(
         pyclause_log=pyclause_log,
     )
     summary = _compute_metrics(per_prop, top_k_values)
-    _print_results(summary, kge_model_name, top_k_values)
-    _save_results(out_dir, summary, prediction_rows, kge_model_name, top_k_values)
+    results_text = _print_results(summary, kge_model_name, top_k_values)
+    _save_results(out_dir, summary, prediction_rows, kge_model_name,
+                  top_k_values, results_text=results_text)
     print(f"  Log pyclause     → {pyclause_log}")
     return summary
 
