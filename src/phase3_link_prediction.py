@@ -69,8 +69,11 @@ def load_model_by_name(model_name: str = 'DistMult'):
             f"Ejecuta primero:  python src/phase2_kge_train.py --model {model_name}"
         )
 
-    model = torch.load(model_path, map_location="cpu", weights_only=False)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model  = torch.load(model_path, map_location=device, weights_only=False)
+    model  = model.to(device)
     model.eval()
+    print(f"[KGE] modelo {model_name} cargado en {device}")
 
     # Intentar cargar el factory guardado durante el entrenamiento.
     # PyKEEN lo guarda en training_triples_factory.pkl (o training.pkl).
@@ -119,7 +122,8 @@ def predict_tails(
         if head_id is None or rel_id is None:
             return []
 
-        hr = torch.tensor([[head_id, rel_id]], dtype=torch.long)
+        device = next(model.parameters()).device
+        hr = torch.tensor([[head_id, rel_id]], dtype=torch.long, device=device)
         with torch.no_grad():
             scores = model.score_t(hr).squeeze(0).cpu()  # [num_entities]
 
@@ -167,7 +171,8 @@ def predict_tails_batch(
         if not rows:
             return [[] for _ in head_labels]
 
-        hr = torch.tensor(rows, dtype=torch.long)
+        device = next(model.parameters()).device
+        hr = torch.tensor(rows, dtype=torch.long, device=device)
         with torch.no_grad():
             scores = model.score_t(hr).cpu()        # [B, num_entities]
 
@@ -204,7 +209,8 @@ def predict_heads(
         if tail_id is None or rel_id is None:
             return []
 
-        rt = torch.tensor([[rel_id, tail_id]], dtype=torch.long)
+        device = next(model.parameters()).device
+        rt = torch.tensor([[rel_id, tail_id]], dtype=torch.long, device=device)
         with torch.no_grad():
             scores = model.score_h(rt).squeeze(0).cpu()  # [num_entities]
 
