@@ -24,6 +24,28 @@ import config as cfg
 
 
 # ---------------------------------------------------------------------------
+# Caches por-factory (evitan reconstruir id_to_ent y diccionarios inversos
+# en cada llamada a predict_tails / predict_heads).
+# ---------------------------------------------------------------------------
+
+_FACTORY_CACHE: dict[int, dict] = {}
+
+
+def _factory_cache(training_factory) -> dict:
+    key = id(training_factory)
+    cache = _FACTORY_CACHE.get(key)
+    if cache is None:
+        cache = {
+            "ent2id":   training_factory.entity_to_id,
+            "rel2id":   training_factory.relation_to_id,
+            "id_to_ent": {v: k for k, v in training_factory.entity_to_id.items()},
+            "id_to_rel": {v: k for k, v in training_factory.relation_to_id.items()},
+        }
+        _FACTORY_CACHE[key] = cache
+    return cache
+
+
+# ---------------------------------------------------------------------------
 # Carga del modelo y fábrica de tripletas
 # ---------------------------------------------------------------------------
 
@@ -91,11 +113,9 @@ def predict_tails(
     entre el factory guardado en el modelo y el factory reconstruido desde TSV.
     """
     try:
-        ent2id = training_factory.entity_to_id
-        rel2id = training_factory.relation_to_id
-
-        head_id = ent2id.get(head_label)
-        rel_id  = rel2id.get(relation_label)
+        cache    = _factory_cache(training_factory)
+        head_id  = cache["ent2id"].get(head_label)
+        rel_id   = cache["rel2id"].get(relation_label)
         if head_id is None or rel_id is None:
             return []
 
@@ -106,7 +126,7 @@ def predict_tails(
         n = min(top_k, scores.shape[0])
         top_scores, top_ids = torch.topk(scores, n)
 
-        id_to_ent = {v: k for k, v in ent2id.items()}
+        id_to_ent = cache["id_to_ent"]
         return [
             (id_to_ent[i.item()], s.item())
             for i, s in zip(top_ids, top_scores)
@@ -127,11 +147,9 @@ def predict_heads(
     Dado (?, relation, tail), devuelve las top_k entidades head más probables.
     """
     try:
-        ent2id = training_factory.entity_to_id
-        rel2id = training_factory.relation_to_id
-
-        tail_id = ent2id.get(tail_label)
-        rel_id  = rel2id.get(relation_label)
+        cache    = _factory_cache(training_factory)
+        tail_id  = cache["ent2id"].get(tail_label)
+        rel_id   = cache["rel2id"].get(relation_label)
         if tail_id is None or rel_id is None:
             return []
 
@@ -142,7 +160,7 @@ def predict_heads(
         n = min(top_k, scores.shape[0])
         top_scores, top_ids = torch.topk(scores, n)
 
-        id_to_ent = {v: k for k, v in ent2id.items()}
+        id_to_ent = cache["id_to_ent"]
         return [
             (id_to_ent[i.item()], s.item())
             for i, s in zip(top_ids, top_scores)
