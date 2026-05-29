@@ -72,11 +72,16 @@ except ImportError:
 SKIP_MARK = "skip"
 DEFAULT_EVAL_JSONL = cfg.DATA_DIR / "evaluacion" / "test_eval_500.jsonl"
 
+# Propiedades que el usuario aporta directamente y que el sistema NO predice.
+# Se pre-cargan en known_props con el ground truth y se excluyen de las métricas.
+USER_PROVIDED_PROPS = {"int_hasCustomer"}
+
 
 # Campos del wizard que SÍ se evalúan en la cascada single-value.
 # Se omiten los multi-valor (hasIntervention) porque sus IDs son únicos
 # y no tiene sentido medirlos contra una recomendación single-target.
-EVAL_PROPS = [p for p in INCIDENT_PROPS if p not in MULTI_VALUE_PROPS]
+EVAL_PROPS = [p for p in INCIDENT_PROPS
+              if p not in MULTI_VALUE_PROPS and p not in {"int_hasCustomer"}]
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +101,7 @@ def _load_eval_jsonl(jsonl_path: Path) -> list[tuple[str, dict]]:
             "Genéralo antes con:  python scripts/build_eval_incidents.py"
         )
 
-    prop_set = set(EVAL_PROPS)
+    prop_set = set(EVAL_PROPS) | set(USER_PROVIDED_PROPS)
     incidents: list[tuple[str, dict]] = []
     with open(jsonl_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -215,10 +220,22 @@ def evaluate_pipeline(
             # reglas y recommend_property se construyeron sobre esa lista.
             known_props: dict[str, str | None] = {p: None for p in INCIDENT_PROPS}
 
+            # Pre-cargar las propiedades aportadas por el usuario (no se predicen).
+            for up_prop in USER_PROVIDED_PROPS:
+                up_val = ground_truth.get(up_prop)
+                if isinstance(up_val, list):
+                    up_val = up_val[0] if up_val else None
+                if up_val and up_val != SKIP_MARK:
+                    known_props[up_prop] = up_val
+
             # Excluir la incidencia objetivo del pool CBR para no contaminar
             cbr_pool = {k: v for k, v in incidents_map.items() if k != inc_id}
 
             for prop in EVAL_PROPS:
+                # Las propiedades aportadas por el usuario no se evalúan.
+                if prop in USER_PROVIDED_PROPS:
+                    continue
+
                 stats = per_prop[prop]
                 true_values = ground_truth.get(prop)
 

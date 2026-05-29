@@ -35,15 +35,21 @@ Uso:
   python src/run_pipeline.py --phase 6 --n-samples 100          # menos muestras
   python src/run_pipeline.py --phase 6 --kge-model TransE
 
-  # Evaluación end-to-end del incident creator (cascada REGLA → KGE+CBR sobre test_eval.ttl)
-  # Para cada incidencia del 5% de test:
-  #   1) intenta la regla: acierto = rule_hit; valor distinto = rule_miss → cae a KGE+CBR
+  # Construcción del conjunto de evaluación (JSONL en data/evaluacion/)
+  # Extrae N incidencias de test_eval.ttl. Campos ausentes → "skip".
+  python src/run_pipeline.py --phase build_eval                 # 500 por defecto
+  python src/run_pipeline.py --phase build_eval --n 1000
+
+  # Evaluación end-to-end del incident creator (cascada REGLA → KGE+CBR sobre el JSONL)
+  # Para cada incidencia del JSONL:
+  #   1) intenta la regla: acierto = rule_hit (rank=1); valor distinto = rule_miss → KGE+CBR
   #   2) KGE+CBR: si el valor real está en top-K = kge_hit (con rank); si no = fail
-  # Saltos: campos vacíos en la incidencia y campos multi-valor (hasIntervention)
+  # Saltos: campos marcados como "skip" en el JSONL.
   # Resultados: out/evaluation/incident_creator_full/<ts>/{results.json, per_property.csv, predictions.csv}
+  # Log pyclause: out/evaluation/reglas/pyclause_<ts>.log
   python src/run_pipeline.py --phase 6_full
   python src/run_pipeline.py --phase 6_full --kge-model TransE
-  python src/run_pipeline.py --phase 6_full --n-samples 200 --kge-model TransE
+  python src/run_pipeline.py --phase 6_full --eval-jsonl data/evaluacion/test_eval_500.jsonl
 
   # Comparación de modelos KGE
   python src/run_pipeline.py --phase compare --n-samples 200
@@ -203,16 +209,37 @@ def run_phase6(kge_model=None, n_samples=None, use_llm=False, llm_model=None):
     )
 
 
-def run_phase6_full(kge_model=None, n_samples=None, top_k=None):
+def run_phase6_full(kge_model=None, n_samples=None, top_k=None, eval_jsonl=None):
     """Eval end-to-end del incident creator (cascada REGLA → KGE+CBR sobre data/evaluacion/test_eval_*.jsonl)."""
-    from phase6_eval_incident_creator import run
+    from phase6_eval_incident_creator import run, DEFAULT_EVAL_JSONL
     if n_samples is not None:
-        print(f"  [!] --n-samples ya no aplica; usa scripts/build_eval_incidents.py "
-              f"para regenerar el JSONL con N={n_samples}.")
+        print(f"  [!] --n-samples ya no aplica en 6_full; usa --phase build_eval --n {n_samples} "
+              f"para regenerar el JSONL.")
     run(
         kge_model_name=kge_model or 'TransE',
         top_k_values=tuple(top_k) if top_k else (1, 3, 5, 10),
+        eval_jsonl=Path(eval_jsonl) if eval_jsonl else DEFAULT_EVAL_JSONL,
     )
+
+
+def run_build_eval(n=500, seed=None, ttl=None, out=None):
+    """Construye data/evaluacion/test_eval_<N>.jsonl desde data/test_eval.ttl."""
+    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+    sys.path.insert(0, str(scripts_dir))
+    from build_eval_incidents import build_eval_set
+    import json
+
+    ttl_path = Path(ttl) if ttl else cfg.TEST_TTL
+    out_dir  = Path(out) if out else cfg.DATA_DIR / "evaluacion"
+    seed_val = seed if seed is not None else cfg.RANDOM_SEED
+
+    rows = build_eval_set(ttl_path, n, seed_val)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"test_eval_{len(rows)}.jsonl"
+    with open(out_path, "w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    print(f"\n✓ Guardado: {out_path}  ({len(rows):,} incidencias)")
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +256,7 @@ def main():
         "--phase",
         default="all",
         choices=["all", "0", "1", "1b", "2", "2_plots", "3", "5", "6", "6_full",
-                 "compare", "create_incident"],
+                 "build_eval", "compare", "create_incident"],
         help="Fase a ejecutar (default: all)",
     )
     parser.add_argument("--test-ratio", type=float, default=None,
@@ -260,6 +287,14 @@ def main():
     # Opciones Phase 6
     parser.add_argument("--n-samples",   type=int, default=None,
                         help=f"Nº de incidencias a evaluar (default: {cfg.EVAL_SAMPLE_N})")
+    # Opciones build_eval / 6_full
+    parser.add_argument("--n",           type=int, default=500,
+                        help="Nº de incidencias para build_eval (default: 500)")
+    parser.add_argument("--seed",        type=int, default=None,
+                        help=f"Semilla para build_eval (default: {cfg.RANDOM_SEED})")
+    parser.add_argument("--eval-jsonl",  default=None,
+                        help="JSONL de evaluación para --phase 6_full "
+                             "(default: data/evaluacion/test_eval_500.jsonl)")
     # Opciones compare
     parser.add_argument("--verbalization-check", action="store_true",
                         help="Verificar integridad de verbalización (solo phase compare)")
@@ -309,7 +344,10 @@ def main():
             run_phase6_full(
                 kge_model=args.kge_model,
                 n_samples=args.n_samples,
+                eval_jsonl=args.eval_jsonl,
             )
+        elif p == "build_eval":
+            run_build_eval(n=args.n, seed=args.seed)
         elif p == "compare":
             run_model_comparison(
                 models=args.kge_models,
