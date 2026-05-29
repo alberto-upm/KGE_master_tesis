@@ -43,7 +43,7 @@ Uso:
   # Resultados: out/evaluation/incident_creator_full/<ts>/{results.json, per_property.csv, predictions.csv}
   python src/run_pipeline.py --phase 6_full
   python src/run_pipeline.py --phase 6_full --kge-model TransE
-  python src/run_pipeline.py --phase 6_full --n-samples 200
+  python src/run_pipeline.py --phase 6_full --n-samples 200 --kge-model TransE
 
   # Comparación de modelos KGE
   python src/run_pipeline.py --phase compare --n-samples 200
@@ -204,11 +204,13 @@ def run_phase6(kge_model=None, n_samples=None, use_llm=False, llm_model=None):
 
 
 def run_phase6_full(kge_model=None, n_samples=None, top_k=None):
-    """Eval end-to-end del incident creator (cascada REGLA → KGE+CBR sobre test_eval.ttl)."""
+    """Eval end-to-end del incident creator (cascada REGLA → KGE+CBR sobre data/evaluacion/test_eval_*.jsonl)."""
     from phase6_eval_incident_creator import run
+    if n_samples is not None:
+        print(f"  [!] --n-samples ya no aplica; usa scripts/build_eval_incidents.py "
+              f"para regenerar el JSONL con N={n_samples}.")
     run(
         kge_model_name=kge_model or 'TransE',
-        n_samples=n_samples,
         top_k_values=tuple(top_k) if top_k else (1, 3, 5, 10),
     )
 
