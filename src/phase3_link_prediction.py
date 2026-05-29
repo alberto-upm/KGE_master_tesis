@@ -136,6 +136,57 @@ def predict_tails(
         return []
 
 
+def predict_tails_batch(
+    model,
+    training_factory,
+    head_labels: list[str],
+    relation_label: str,
+    top_k: int = cfg.TOP_K_PREDICT,
+) -> list[list[tuple[str, float]]]:
+    """
+    Versión batched de predict_tails: una sola pasada por el KGE para B cabezas
+    con la misma relación. Devuelve [top_k_de_head_1, top_k_de_head_2, …].
+    Mucho más rápido que llamar predict_tails B veces (elimina B-1 overheads).
+    """
+    if not head_labels:
+        return []
+    try:
+        cache  = _factory_cache(training_factory)
+        ent2id = cache["ent2id"]
+        rel_id = cache["rel2id"].get(relation_label)
+        if rel_id is None:
+            return [[] for _ in head_labels]
+
+        rows: list[list[int]] = []
+        keep: list[int] = []   # índices originales que pudieron mapearse
+        for i, h in enumerate(head_labels):
+            hid = ent2id.get(h)
+            if hid is not None:
+                rows.append([hid, rel_id])
+                keep.append(i)
+        if not rows:
+            return [[] for _ in head_labels]
+
+        hr = torch.tensor(rows, dtype=torch.long)
+        with torch.no_grad():
+            scores = model.score_t(hr).cpu()        # [B, num_entities]
+
+        n = min(top_k, scores.shape[1])
+        top_scores, top_ids = torch.topk(scores, n, dim=1)
+
+        id_to_ent = cache["id_to_ent"]
+        out: list[list[tuple[str, float]]] = [[] for _ in head_labels]
+        for j, orig_i in enumerate(keep):
+            out[orig_i] = [
+                (id_to_ent[i.item()], s.item())
+                for i, s in zip(top_ids[j], top_scores[j])
+                if i.item() in id_to_ent
+            ]
+        return out
+    except Exception:
+        return [[] for _ in head_labels]
+
+
 def predict_heads(
     model,
     training_factory,

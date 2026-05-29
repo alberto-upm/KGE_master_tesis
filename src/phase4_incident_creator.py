@@ -241,7 +241,7 @@ def recommend_property(
     Devuelve (lista de (entity_label, cbr_freq, kge_score, wrrf_score), n_proxies)
     ordenada por WRRF DESC.
     """
-    from phase3_link_prediction import predict_tails, predict_heads
+    from phase3_link_prediction import predict_tails_batch, predict_heads
 
     proxies = find_matching_incidents(known_props, incidents_map,
                                       index=index, exclude_id=exclude_id)
@@ -258,9 +258,14 @@ def recommend_property(
         return [], 0
 
     n_proxies = len(proxies)
+    proxies_batch = proxies[:30]
+    # Una sola pasada batched por el KGE para los 30 proxies.
+    per_proxy_topk = predict_tails_batch(model, factory, proxies_batch,
+                                         target_prop, top_k)
+
     scores: dict[str, list[float]] = {}
-    for proxy in proxies[:30]:
-        for entity, score in predict_tails(model, factory, proxy, target_prop, top_k):
+    for ranked in per_proxy_topk:
+        for entity, score in ranked:
             scores.setdefault(entity, []).append(score)
 
     aggregated = [
