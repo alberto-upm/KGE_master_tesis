@@ -223,23 +223,17 @@ def run_phase6_full(kge_model=None, n_samples=None, top_k=None, eval_jsonl=None)
 
 
 def run_build_eval(n=500, seed=None, ttl=None, out=None):
-    """Construye data/evaluacion/test_eval_<N>.jsonl desde data/test_eval.ttl."""
+    """Construye data/evaluacion/test_eval_<N>.jsonl + resumen de skips en
+    out/evaluacion/test_eval_<N>_skips.txt"""
     scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
     sys.path.insert(0, str(scripts_dir))
-    from build_eval_incidents import build_eval_set
-    import json
+    from build_eval_incidents import build_and_save
 
     ttl_path = Path(ttl) if ttl else cfg.TEST_TTL
     out_dir  = Path(out) if out else cfg.DATA_DIR / "evaluacion"
     seed_val = seed if seed is not None else cfg.RANDOM_SEED
 
-    rows = build_eval_set(ttl_path, n, seed_val)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"test_eval_{len(rows)}.jsonl"
-    with open(out_path, "w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    print(f"\n✓ Guardado: {out_path}  ({len(rows):,} incidencias)")
+    build_and_save(ttl_path, n, seed_val, out_dir)
 
 
 # ---------------------------------------------------------------------------

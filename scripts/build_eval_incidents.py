@@ -108,6 +108,56 @@ def build_eval_set(
     return out_rows
 
 
+def build_and_save(ttl_path: Path, n: int, seed: int, out_dir: Path) -> Path:
+    """Construye el JSONL + el resumen TXT de skips por propiedad.
+    Devuelve la ruta del JSONL generado."""
+    from datetime import datetime
+
+    rows = build_eval_set(ttl_path, n, seed)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"test_eval_{len(rows)}.jsonl"
+    with open(out_path, "w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    # Estadísticas de skips
+    n_skips_per_prop = {p: 0 for p in INCIDENT_PROPS}
+    for row in rows:
+        for p, v in row["incident"].items():
+            if v == SKIP_MARK:
+                n_skips_per_prop[p] += 1
+
+    header = (f"Resumen del set de evaluación generado el "
+              f"{datetime.now().isoformat(timespec='seconds')}\n"
+              f"  TTL fuente   : {ttl_path}\n"
+              f"  N incidencias: {len(rows):,}\n"
+              f"  Seed         : {seed}\n"
+              f"  Salida JSONL : {out_path}\n\n"
+              f"  Skips por propiedad:\n")
+    rows_txt: list[str] = []
+    for p in INCIDENT_PROPS:
+        n_skip = n_skips_per_prop[p]
+        n_fill = len(rows) - n_skip
+        rows_txt.append(f"    {p:<24}  filled={n_fill:>5}   skip={n_skip:>5}")
+    table_text = header + "\n".join(rows_txt) + "\n"
+
+    # Consola
+    print(f"\n✓ Guardado: {out_path}  ({len(rows):,} incidencias)")
+    print("\n  Skips por propiedad:")
+    for line in rows_txt:
+        print(line)
+
+    # TXT en out/evaluacion/
+    txt_dir = cfg.OUT_DIR / "evaluacion"
+    txt_dir.mkdir(parents=True, exist_ok=True)
+    txt_path = txt_dir / f"test_eval_{len(rows)}_skips.txt"
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write(table_text)
+    print(f"\n✓ Resumen TXT: {txt_path}")
+    return out_path
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Construye el JSONL de incidencias de evaluación desde test_eval.ttl"
@@ -123,27 +173,7 @@ def main():
                         help=f"Semilla para muestreo (default: {cfg.RANDOM_SEED})")
     args = parser.parse_args()
 
-    rows = build_eval_set(args.ttl, args.n, args.seed)
-
-    args.out.mkdir(parents=True, exist_ok=True)
-    out_path = args.out / f"test_eval_{len(rows)}.jsonl"
-    with open(out_path, "w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-
-    # Estadísticas
-    n_skips_per_prop = {p: 0 for p in INCIDENT_PROPS}
-    for row in rows:
-        for p, v in row["incident"].items():
-            if v == SKIP_MARK:
-                n_skips_per_prop[p] += 1
-
-    print(f"\n✓ Guardado: {out_path}  ({len(rows):,} incidencias)")
-    print("\n  Skips por propiedad:")
-    for p in INCIDENT_PROPS:
-        n_skip = n_skips_per_prop[p]
-        n_fill = len(rows) - n_skip
-        print(f"    {p:<24}  filled={n_fill:>4}   skip={n_skip:>4}")
+    build_and_save(args.ttl, args.n, args.seed, args.out)
 
 
 if __name__ == "__main__":
