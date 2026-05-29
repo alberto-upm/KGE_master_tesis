@@ -126,22 +126,31 @@ def _redirect_fds_to_file(log_path: Path):
     """
     Redirige stdout y stderr a nivel de file-descriptor (cubre prints C++ de
     c_clause). Restaura los FDs originales al salir.
+
+    Yieldea un file-handle Python escribible al terminal real (stderr original),
+    útil para que tqdm muestre la barra de progreso aunque FD 2 esté redirigido.
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     saved_stdout_fd = os.dup(1)
     saved_stderr_fd = os.dup(2)
+    # File-like que apunta al stderr REAL del terminal (no se redirige).
+    terminal_stderr = os.fdopen(os.dup(saved_stderr_fd), "w", buffering=1)
     sys.stdout.flush()
     sys.stderr.flush()
     os.dup2(log_fd, 1)
     os.dup2(log_fd, 2)
     try:
-        yield
+        yield terminal_stderr
     finally:
         sys.stdout.flush()
         sys.stderr.flush()
         os.dup2(saved_stdout_fd, 1)
         os.dup2(saved_stderr_fd, 2)
+        try:
+            terminal_stderr.close()
+        except Exception:
+            pass
         os.close(saved_stdout_fd)
         os.close(saved_stderr_fd)
         os.close(log_fd)
@@ -211,10 +220,17 @@ def evaluate_pipeline(
     prediction_rows: list[dict] = []
 
     # --- Bucle principal (con barra de progreso y pyclause silenciado) ---
-    iterator = tqdm(test_incidents, desc="Evaluando", unit="inc",
-                    total=len(test_incidents), dynamic_ncols=True)
-
-    with _redirect_fds_to_file(log_target) if pyclause_log else contextlib.nullcontext():
+    # La barra de progreso usa el stderr REAL (devuelto por el redirector) para
+    # que no se la trague el log de pyclause.
+    redirect_ctx = (
+        _redirect_fds_to_file(log_target) if pyclause_log
+        else contextlib.nullcontext(sys.stderr)
+    )
+    with redirect_ctx as terminal_stderr:
+        iterator = tqdm(test_incidents, desc="Evaluando", unit="inc",
+                        total=len(test_incidents),
+                        dynamic_ncols=True, file=terminal_stderr,
+                        mininterval=0.5)
         for inc_id, ground_truth in iterator:
             # known_props sigue indexado por INCIDENT_PROPS porque el motor de
             # reglas y recommend_property se construyeron sobre esa lista.
