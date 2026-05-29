@@ -210,6 +210,25 @@ class RuleEnginePyClause:
         # las consultas sobre _QUERY_ENTITY.
         self._world_triples = self._build_world_triples()
 
+        # Pre-agrupar reglas por predicado-cabeza para evitar escanear las
+        # ~3 000 reglas en cada query. Cada entrada apunta a los índices de
+        # _rules cuya cabeza es ese predicado.
+        self._rules_by_head: dict[str, list[int]] = {}
+        for i, h_pred in enumerate(self._head_preds):
+            self._rules_by_head.setdefault(h_pred, []).append(i)
+
+        # Mundo mínimo por head: solo los triples del mundo cuyo predicado
+        # aparece en alguna regla con esa cabeza (suma de head + body preds
+        # de ese subconjunto). 5–10× menos triples por carga PyClause.
+        self._world_by_head: dict[str, list[tuple[str, str, str]]] = {}
+        for h_pred, idxs in self._rules_by_head.items():
+            relevant_rels: set[str] = {h_pred}
+            for i in idxs:
+                relevant_rels.update(self._body_rels[i])
+            self._world_by_head[h_pred] = [
+                t for t in self._world_triples if t[1] in relevant_rels
+            ]
+
     # ------------------------------------------------------------------
 
     def _build_world_triples(self) -> list[tuple[str, str, str]]:
@@ -277,21 +296,22 @@ class RuleEnginePyClause:
             return self._fallback_query(known, target_prop)
 
         # Filtrar a reglas con cabeza == target_prop cuyo cuerpo esté en los hechos conocidos.
-        # El mundo semilla ya garantiza que todos los nodos/relaciones son reconocidos.
+        # Restringido a self._rules_by_head[target_prop] (≪ self._rules).
+        candidate_idx = self._rules_by_head.get(target_prop)
+        if not candidate_idx:
+            return None
         known_rels = set(known.keys())
-        indices = [
-            i for i, (h_pred, brels) in enumerate(zip(self._head_preds, self._body_rels))
-            if h_pred == target_prop and brels.issubset(known_rels)
-        ]
+        body_rels  = self._body_rels
+        indices    = [i for i in candidate_idx if body_rels[i].issubset(known_rels)]
         if not indices:
             return None
 
         filtered_rules = [self._rules[i] for i in indices]
         filtered_stats = [self._stats[i] for i in indices]
 
-        # KG temporal = mundo semilla (todas las entidades/relaciones de las reglas)
+        # KG temporal = mundo mínimo para esta cabeza
         #             + hechos conocidos del incidente en construcción
-        data = list(self._world_triples)
+        data = list(self._world_by_head.get(target_prop, self._world_triples))
         for rel, val in known.items():
             data.append((_QUERY_ENTITY, rel, val))
 
