@@ -42,7 +42,7 @@ LEARNING_TIME = 1000
 # Paso 1: N3 → TSV
 # ---------------------------------------------------------------------------
 
-def n3_to_tsv(n3_path: Path, out_path: Path) -> int:
+def n3_to_tsv(n3_path: Path, out_path: Path, exclude_preds: set[str] | None = None) -> int:
     """
     Convierte un fichero N3 con prefijo 'repcon:' al formato plano de AnyBURL:
         sujeto<TAB>predicado<TAB>objeto
@@ -50,8 +50,13 @@ def n3_to_tsv(n3_path: Path, out_path: Path) -> int:
     Maneja la sintaxis Turtle compacta:
       repcon:X repcon:p1 repcon:v1 ;
                repcon:p2 repcon:v2 .
+
+    exclude_preds: conjunto de predicados (nombre local, sin prefijo) a omitir.
+                   Las tripletas con esos predicados no se escriben en el TSV.
     """
     print(f"[1/4] Convirtiendo {n3_path.name} → {out_path.name} ...")
+
+    exclude = exclude_preds or set()
 
     def strip_prefix(token: str) -> str:
         token = token.rstrip(" ;.,")
@@ -60,6 +65,7 @@ def n3_to_tsv(n3_path: Path, out_path: Path) -> int:
         return token
 
     n_triples = 0
+    n_excluded = 0
     current_subject = None
 
     with open(n3_path, "r", encoding="utf-8") as fin, \
@@ -81,8 +87,11 @@ def n3_to_tsv(n3_path: Path, out_path: Path) -> int:
                 pred  = strip_prefix(parts[1])
                 obj   = strip_prefix(parts[2])
                 if current_subject and pred and obj:
-                    fout.write(f"{current_subject}\t{pred}\t{obj}\n")
-                    n_triples += 1
+                    if pred in exclude:
+                        n_excluded += 1
+                    else:
+                        fout.write(f"{current_subject}\t{pred}\t{obj}\n")
+                        n_triples += 1
             else:
                 # Continuación con el mismo sujeto (línea indentada)
                 if current_subject is None:
@@ -93,10 +102,15 @@ def n3_to_tsv(n3_path: Path, out_path: Path) -> int:
                 pred = strip_prefix(parts[0])
                 obj  = strip_prefix(parts[1])
                 if pred and obj:
-                    fout.write(f"{current_subject}\t{pred}\t{obj}\n")
-                    n_triples += 1
+                    if pred in exclude:
+                        n_excluded += 1
+                    else:
+                        fout.write(f"{current_subject}\t{pred}\t{obj}\n")
+                        n_triples += 1
 
     print(f"        {n_triples:,} triples escritos.")
+    if exclude:
+        print(f"        {n_excluded:,} triples excluidos (predicados: {', '.join(sorted(exclude))}).")
     return n_triples
 
 

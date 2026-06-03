@@ -39,7 +39,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import config as cfg
 from phase4_incident_creator import INCIDENT_PROPS, MULTI_VALUE_PROPS
-from phase1b_generate_corpus import load_graph, build_incident_map
+from graph_utils import load_graph, build_incident_map
 
 
 SKIP_MARK = "skip"

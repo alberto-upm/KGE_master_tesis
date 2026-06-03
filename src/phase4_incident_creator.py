@@ -305,11 +305,9 @@ def _build_incidents_map_from_tsv() -> dict:
     Solo incluye triples cuya cabeza sea una incidencia (empieza por 'incident_')
     y cuya relación sea una de las propiedades relevantes (INCIDENT_PROPS).
 
-    FUTURO — enriquecer el pool CBR con las incidencias del split de
-    evaluación (cfg.TEST_TSV / data/triples/test.tsv), fusionándolas al
-    mismo dict en este bucle. ⚠ Sólo activarlo en producción: si se hace
-    antes de ejecutar la fase 6 se contamina el conjunto de test y las
-    métricas de Hits@K / MRR dejan de ser válidas.
+    El pool CBR usa únicamente train.tsv (el 95% de entrenamiento). Las
+    incidencias de test_eval.ttl se mantienen fuera para no contaminar las
+    métricas de la fase 6_full.
     """
     if not cfg.TRAIN_TSV.exists():
         raise FileNotFoundError(
