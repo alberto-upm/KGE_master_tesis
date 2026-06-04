@@ -25,7 +25,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
 
-RULES_FILE = cfg.DATA_DIR / "reglas" / "rules-1000"
+RULES_FILE = cfg.RULES_FILE
 _QUERY_ENTITY = "incident__QUERY"
 
 

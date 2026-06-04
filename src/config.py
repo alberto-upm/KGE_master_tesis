@@ -23,6 +23,9 @@ TEST_TTL    = DATA_DIR / "test_eval.ttl"
 
 TRIPLES_DIR = DATA_DIR / "triples"
 
+# Reglas AnyBURL para la capa simbólica (incident creator + eval fase 6)
+RULES_FILE  = DATA_DIR / "reglas" / "train_full_incidents" / "rules-1000"
+
 OUT_DIR     = BASE_DIR / "out"
 MAPS_DIR    = OUT_DIR / "maps"  # Mapas entity_to_id / relation_to_id (compartidos)
 PRED_DIR    = OUT_DIR / "predictions"
