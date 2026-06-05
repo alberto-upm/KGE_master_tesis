@@ -30,8 +30,10 @@ SNAPSHOTS_AT                  = "100,500,1000"
 WORKER_THREADS                = 7
 XMX                           = "12G"
 
-# Predicados que NO deben entrar en el TSV de aprendizaje de reglas
-EXCLUDE_PREDS = {"hasDedicationTimeMin", "createdOn"}
+# Predicados que NO deben entrar en el TSV de aprendizaje de reglas.
+# hasIntervention se excluye: las intervenciones se introducen a mano en el
+# incident creator, no se predicen con reglas, y sólo añaden ruido al aprendizaje.
+EXCLUDE_PREDS = {"hasDedicationTimeMin", "createdOn", "hasIntervention"}
 
 
 def write_config(config_path: Path, tsv_path: Path, out_dir: Path) -> None:
@@ -45,7 +47,7 @@ THRESHOLD_CONFIDENCE = {THRESHOLD_CONFIDENCE}
 
 SNAPSHOTS_AT = {SNAPSHOTS_AT}
 
-SAFE_PREFIX_MODE = true
+SAFE_PREFIX_MODE = false
 WORKER_THREADS = {WORKER_THREADS}
 """
     config_path.write_text(config, encoding="utf-8")
@@ -56,7 +58,19 @@ def main():
         print(f"[!] No existe {SPLITS_DIR}")
         sys.exit(1)
 
-    ttl_files = sorted(SPLITS_DIR.glob("*.ttl"))
+    # Si se pasan nombres de split por la línea de comandos, procesar solo esos.
+    # Ej.:  python scripts/learn_rules_splits.py train_full_incidents train_full_incidents_interventions
+    requested = [a.removesuffix(".ttl") for a in sys.argv[1:]]
+    if requested:
+        ttl_files = [SPLITS_DIR / f"{name}.ttl" for name in requested]
+        missing = [t for t in ttl_files if not t.exists()]
+        if missing:
+            print("[!] No existen estos splits:")
+            for t in missing:
+                print(f"    {t}")
+            sys.exit(1)
+    else:
+        ttl_files = sorted(SPLITS_DIR.glob("*.ttl"))
     if not ttl_files:
         print(f"[!] No hay .ttl en {SPLITS_DIR}")
         sys.exit(1)

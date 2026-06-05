@@ -67,6 +67,11 @@ def _model_config(model_lower: str, dim: int, margin: float) -> dict:
     Modelos bilineales: BCEWithLogitsLoss + basic.
       - DistMult/ComplEx funcionan mejor con BCE y muestreo uniforme.
     HAKE: NSSALoss + basic (modular + fase; bernoulli añade ruido en el módulo).
+    ConvE: convolucional. Requisitos especiales de PyKEEN:
+      - needs_inverse: el TriplesFactory debe crearse con create_inverse_triples=True
+        (ConvE solo puntúa colas; predice cabezas vía relaciones inversas).
+      - no_sub_batch: las capas BatchNorm impiden el sub-batching, así que no se
+        puede pasar sub_batch_size (de lo contrario: SubBatchingNotSupportedError).
     """
     nssa = dict(loss="NSSALoss",
                 loss_kwargs=dict(margin=margin, adversarial_temperature=1.0),
@@ -86,8 +91,13 @@ def _model_config(model_lower: str, dim: int, margin: float) -> dict:
         # HAKE: módulo captura nivel jerárquico, fase captura diferencia semántica
         "hake":     {**nssa, "model_kwargs": dict(embedding_dim=dim)},
         "distmult": {**nssa,  "model_kwargs": dict(embedding_dim=dim)},
-        # ComplEx: 
+        # ComplEx:
         "complex":  {**nssa,  "model_kwargs": dict(embedding_dim=dim)},
+        # ConvE: convolucional 2D. dim debe ser factorizable como alto×ancho
+        # (PyKEEN deriva la rejilla; p.ej. 256 -> 16x16). Necesita inverse
+        # triples y no admite sub-batching (ver flags abajo).
+        "conve":    {**bce, "model_kwargs": dict(embedding_dim=dim),
+                     "needs_inverse": True, "no_sub_batch": True},
     }
     if model_lower not in configs:
         # Fallback genérico para cualquier otro modelo de PyKEEN
@@ -133,8 +143,18 @@ def train(
             "Ejecuta primero:  python src/phase1_triples.py"
         )
 
+    # Algunos modelos (ConvE) requieren relaciones inversas. Se decide aquí,
+    # antes de cargar/particionar, porque create_inverse_triples es propiedad
+    # del TriplesFactory y se propaga a los splits.
+    model_lower = model_name.lower()
+    mcfg = _model_config(model_lower, dim, margin)
+    needs_inverse = mcfg.get("needs_inverse", False)
+    no_sub_batch  = mcfg.get("no_sub_batch", False)
+
     print(f"[1/3] Cargando tripletas desde {cfg.TRAIN_TSV} ...")
-    full = TriplesFactory.from_path(cfg.TRAIN_TSV)
+    full = TriplesFactory.from_path(cfg.TRAIN_TSV, create_inverse_triples=needs_inverse)
+    if needs_inverse:
+        print(f"      (create_inverse_triples=True — requerido por {model_name})")
     print(f"      Total de tripletas cargadas: {full.num_triples:,}")
 
     training, validation, testing = full.split(
@@ -145,9 +165,6 @@ def train(
     print(f"      Relaciones: {training.num_relations:,}")
     print(f"      Train / Valid / Test: "
           f"{training.num_triples:,} / {validation.num_triples:,} / {testing.num_triples:,}")
-
-    model_lower = model_name.lower()
-    mcfg = _model_config(model_lower, dim, margin)
 
     loss          = mcfg["loss"]
     loss_kwargs   = mcfg["loss_kwargs"]
@@ -182,7 +199,13 @@ def train(
         ),
         training_loop="sLCWA",
         training_loop_kwargs=dict(automatic_memory_optimization=False),
-        training_kwargs=dict(num_epochs=epochs, batch_size=batch, sub_batch_size=2048),
+        # ConvE (no_sub_batch) no admite sub_batch_size por sus capas BatchNorm.
+        # Para esos modelos se omite y se entrena con el batch_size completo.
+        training_kwargs=dict(
+            num_epochs=epochs,
+            batch_size=batch,
+            **({} if no_sub_batch else dict(sub_batch_size=2048)),
+        ),
         loss=loss,
         loss_kwargs=loss_kwargs if loss_kwargs else None,
         negative_sampler=sampler,
