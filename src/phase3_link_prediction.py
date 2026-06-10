@@ -159,6 +159,9 @@ def predict_tails_batch(
         ent2id = cache["ent2id"]
         rel_id = cache["rel2id"].get(relation_label)
         if rel_id is None:
+            print(f"[KGE][diag] La relación '{relation_label}' no está en el "
+                  f"vocabulario del modelo ({len(cache['rel2id'])} relaciones). "
+                  f"Sin predicción de cola.")
             return [[] for _ in head_labels]
 
         rows: list[list[int]] = []
@@ -169,6 +172,11 @@ def predict_tails_batch(
                 rows.append([hid, rel_id])
                 keep.append(i)
         if not rows:
+            print(f"[KGE][diag] Ninguno de los {len(head_labels)} proxies CBR "
+                  f"existe en el vocabulario del modelo ({len(ent2id)} entidades). "
+                  f"Probablemente train.tsv se regeneró tras entrenar el modelo: "
+                  f"los IDs de incidencia ya no coinciden. Reentrena el KGE o usa "
+                  f"el train.tsv original.")
             return [[] for _ in head_labels]
 
         device = next(model.parameters()).device
@@ -188,7 +196,10 @@ def predict_tails_batch(
                 if i.item() in id_to_ent
             ]
         return out
-    except Exception:
+    except Exception as e:
+        import traceback
+        print(f"[KGE][diag] predict_tails_batch falló: {type(e).__name__}: {e}")
+        traceback.print_exc()
         return [[] for _ in head_labels]
 
 
