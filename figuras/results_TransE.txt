@@ -1,0 +1,32 @@
+
+======================================================================
+  Resultados — TransE
+  Campos evaluados: 3,267   saltados: 733
+======================================================================
+  Cascada:
+    rule_hit    :   1,671   (51.15%)
+    rule_miss   :     315   (9.64%)
+    fail        :     182   (5.57%)
+  Reglas:
+    coverage    : 0.6079
+    precision   : 0.8414
+  Pipeline completo (regla cuenta como rank=1):
+    Hit@1       : 0.6725
+    Hit@3       : 0.8482
+    Hit@5       : 0.8926
+    Hit@10      : 0.9443
+    MRR         : 0.7690
+    MRR (KGE)   : 0.5271   (solo pasos que llegaron a KGE)
+
+  Desglose por propiedad:
+  Propiedad                      N    RH    RM  FAIL    H@1    H@3    H@5   H@10    MRR
+  -------------------------------------------------------------------------------------
+  hasTypeInc                   500   337   163     0  0.816  1.000  1.000  1.000  0.908
+  incident_hasOrigin           500   433    67     1  0.932  0.998  0.998  0.998  0.959
+  hasSupportGroup              500    61    10    45  0.408  0.678  0.790  0.910  0.569
+  hasTechnician                382     0     0    92  0.199  0.469  0.571  0.759  0.362
+  hasSupportCategory           299    61     7    29  0.488  0.752  0.833  0.903  0.630
+  hasSupportTeam               500   266    60    12  0.728  0.922  0.954  0.976  0.829
+  hasStateIncident             500   493     7     0  0.994  1.000  1.000  1.000  0.997
+  hasExternalTechnician         86    20     1     3  0.419  0.791  0.907  0.965  0.634
+======================================================================

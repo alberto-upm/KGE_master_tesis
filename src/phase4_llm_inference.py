@@ -1,5 +1,5 @@
 """
-Fase 4 — Inferencia con LLM aumentado con contexto KGE (Graph RAG).
+Fase 4 — Inferencia con LLM aumentado con contexto KGE.
 
 Librería usada por phase4_incident_creator para generar el resumen final de
 la incidencia. Expone:

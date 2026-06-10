@@ -639,6 +639,7 @@ class IncidentCreatorSession:
         recs: list = []
         n_proxies: int = 0
         last_question: str = ""
+        rejected_rule_prop = None  # propiedad cuya regla ya rechazó el usuario
 
         while prop_idx < total:
             prop  = INCIDENT_PROPS[prop_idx]
@@ -662,7 +663,7 @@ class IncidentCreatorSession:
                 continue
 
             # Capa 3 — Inferencia en cascada: REGLA → KGE+CBR
-            if not recs:
+            if not recs and rejected_rule_prop != prop:
                 rule_hit = self.rule_engine.query(incident, prop)
                 if rule_hit:
                     val  = rule_hit["value"]
@@ -683,16 +684,11 @@ class IncidentCreatorSession:
                     if cmd in ("saltar", "skip"):
                         prop_idx += 1; recs = []; continue
                     if cmd in ("n", "no"):
-                        # Rechazar la regla → calcular KGE+CBR y continuar
+                        # Rechazar la regla → no volver a mostrarla; el cálculo
+                        # KGE+CBR se hace en el bloque siguiente (una sola vez).
                         print("  [Regla rechazada. Calculando recomendaciones KGE+CBR ...]")
-                        recs, n_proxies = recommend_property(
-                            known_props=incident,
-                            target_prop=prop,
-                            incidents_map=self.incidents_map,
-                            model=self.model,
-                            factory=self.factory,
-                            top_k=self.top_k,
-                        )
+                        rejected_rule_prop = prop
+                        recs = []
                         continue
                     if cmd in ("s", "si", "y", "yes", ""):
                         incident[prop] = val
