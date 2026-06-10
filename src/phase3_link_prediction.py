@@ -49,7 +49,7 @@ def _factory_cache(training_factory) -> dict:
 # Carga del modelo y fábrica de tripletas
 # ---------------------------------------------------------------------------
 
-def load_model_by_name(model_name: str = 'DistMult'):
+def load_model_by_name(model_name: str = 'DistMult', device: str | None = None):
     """
     Carga un modelo KGE entrenado por nombre desde out/models/<model_name>/.
     Retorna (model, training_factory).
@@ -57,6 +57,12 @@ def load_model_by_name(model_name: str = 'DistMult'):
     El factory se carga del directorio del modelo (guardado por PyKEEN durante
     el entrenamiento), garantizando que entity_to_id coincide exactamente con
     el vocabulario con el que se entrenó el modelo.
+
+    device: "cuda" | "cpu" | None.
+      - None  → CUDA si está disponible (usado en evaluación del sistema).
+      - "cpu" → fuerza CPU. Útil en create_incident, donde la GPU la ocupa vLLM
+                y compartirla provoca el fallo NVML del allocator de PyTorch en
+                score_t. El scoring de unos pocos proxies en CPU es trivial.
     """
     import pickle
     from pykeen.triples import TriplesFactory
@@ -69,7 +75,8 @@ def load_model_by_name(model_name: str = 'DistMult'):
             f"Ejecuta primero:  python src/phase2_kge_train.py --model {model_name}"
         )
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     model  = torch.load(model_path, map_location=device, weights_only=False)
     model  = model.to(device)
     model.eval()

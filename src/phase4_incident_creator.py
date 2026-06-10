@@ -377,7 +377,10 @@ class IncidentCreatorSession:
         # Modelo KGE
         from phase3_link_prediction import load_model_by_name
         print(f"  [3/4] Cargando modelo KGE: {kge_model_name} ...")
-        self.model, self.factory = load_model_by_name(kge_model_name)
+        # CPU: en create_incident la GPU la ocupa vLLM (LLM). Compartirla rompe
+        # score_t con el fallo NVML del allocator de PyTorch. La evaluación del
+        # sistema (phase6) sigue usando GPU vía el device por defecto.
+        self.model, self.factory = load_model_by_name(kge_model_name, device="cpu")
 
         # LLM (opcional)
         if use_llm:
