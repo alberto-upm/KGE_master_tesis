@@ -154,27 +154,46 @@ def convert_n3_to_ttl(src: Path, dst: Path) -> None:
 # Punto de entrada
 # ---------------------------------------------------------------------------
 
-def run(test_ratio: float = TEST_RATIO, seed: int = RANDOM_SEED) -> None:
+def run(
+    test_ratio: float = TEST_RATIO,
+    seed: int = RANDOM_SEED,
+    input_graph: str | Path | None = None,
+) -> None:
     print("=" * 60)
     print("FASE 0 — Conversión N3→TTL + split train/test")
     print(f"  Test ratio : {test_ratio:.0%}")
     print(f"  Semilla    : {seed}")
     print("=" * 60)
 
-    # Paso 0: convertir N3 → TTL si el TTL no existe todavía
-    if not INPUT_FILE.exists():
-        if N3_SOURCE.exists():
-            convert_n3_to_ttl(N3_SOURCE, INPUT_FILE)
+    # Paso 0: resolver el grafo de partida y dejarlo en formato TTL (input_file).
+    if input_graph is not None:
+        # Grafo indicado por el usuario (--input). Acepta .ttl (se usa tal cual)
+        # o .n3/otros (se convierte a un .ttl hermano con rdflib).
+        src = Path(input_graph)
+        if not src.exists():
+            raise FileNotFoundError(f"No se encontró el grafo indicado: {src}")
+        if src.suffix.lower() in (".ttl", ".turtle"):
+            input_file = src
+            print(f"[0/4] Usando grafo TTL indicado: {src}")
         else:
-            raise FileNotFoundError(
-                f"No se encontró ni {INPUT_FILE.name} ni {N3_SOURCE.name} en {DATA_DIR}"
-            )
+            input_file = src.with_suffix(".ttl")
+            convert_n3_to_ttl(src, input_file)
     else:
-        print(f"[0/4] {INPUT_FILE.name} ya existe, se omite la conversión.")
+        # Comportamiento por defecto: data/incident_triplets.{ttl|n3}
+        input_file = INPUT_FILE
+        if not input_file.exists():
+            if N3_SOURCE.exists():
+                convert_n3_to_ttl(N3_SOURCE, input_file)
+            else:
+                raise FileNotFoundError(
+                    f"No se encontró ni {INPUT_FILE.name} ni {N3_SOURCE.name} en {DATA_DIR}"
+                )
+        else:
+            print(f"[0/4] {INPUT_FILE.name} ya existe, se omite la conversión.")
 
     # 1. Parsear bloques
     print("\n[1/4] Parseando bloques del N3 ...")
-    prefix_line, blocks = parse_blocks(INPUT_FILE)
+    prefix_line, blocks = parse_blocks(input_file)
     print(f"      Bloques totales: {len(blocks):,}")
 
     # 2. Clasificar entidades por tipo

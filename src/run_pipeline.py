@@ -121,13 +121,15 @@ def _stop_logging(tee: "_Tee | None"):
 # Ejecución de fases
 # ---------------------------------------------------------------------------
 
-def run_phase0(test_ratio=None, seed=None):
+def run_phase0(test_ratio=None, seed=None, input_graph=None):
     from phase0_split import run
     kwargs = {}
     if test_ratio is not None:
         kwargs["test_ratio"] = test_ratio
     if seed is not None:
         kwargs["seed"] = seed
+    if input_graph is not None:
+        kwargs["input_graph"] = input_graph
     run(**kwargs)
 
 
@@ -213,6 +215,9 @@ def main():
     )
     parser.add_argument("--test-ratio", type=float, default=None,
                         help="Fracción de incidencias para test (default: 0.05, solo phase 0)")
+    parser.add_argument("--input", default=None,
+                        help="Grafo de partida para phase 0 (.n3 o .ttl). "
+                             "Por defecto data/incident_triplets.{ttl|n3}")
     # Opciones Phase 2 — entrenamiento KGE
     parser.add_argument("--epochs", type=int, default=None,
                         help=f"Épocas de entrenamiento (default: {cfg.N_EPOCHS})")
@@ -257,7 +262,7 @@ def main():
     for p in phases_to_run:
         t0 = time.time()
         if p == "0":
-            run_phase0(test_ratio=args.test_ratio)
+            run_phase0(test_ratio=args.test_ratio, input_graph=args.input)
         elif p == "1":
             run_phase1()
         elif p == "2":
