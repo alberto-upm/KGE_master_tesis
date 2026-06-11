@@ -23,6 +23,9 @@ Uso:
   python src/run_pipeline.py --phase 3
   python src/run_pipeline.py --phase 3 --kge-model ComplEx
 
+  # Aprendizaje de reglas Horn con AnyBURL (OPCIONAL · requiere Java · fuera de --phase all)
+  python src/run_pipeline.py --phase 4
+
   # Creación guiada de incidencias (CBR + KGE + LLM)
   python src/run_pipeline.py --phase create_incident
   python src/run_pipeline.py --phase create_incident --no-llm
@@ -39,17 +42,18 @@ Uso:
   #   2) KGE+CBR: si el valor real está en top-K = kge_hit (con rank); si no = fail
   # Saltos: campos marcados como "skip" en el JSONL.
   # Resultados: out/evaluation/incident_creator_full/<ts>/{results.json, per_property.csv, predictions.csv}
-  python src/run_pipeline.py --phase 6_full
-  python src/run_pipeline.py --phase 6_full --kge-model TransE
-  python src/run_pipeline.py --phase 6_full --eval-jsonl data/evaluacion/test_eval_500.jsonl
+  python src/run_pipeline.py --phase 6
+  python src/run_pipeline.py --phase 6 --kge-model TransE
+  python src/run_pipeline.py --phase 6 --eval-jsonl data/evaluacion/test_eval_500.jsonl
 
   # Opciones del modelo KGE
   python src/run_pipeline.py --phase 2 --epochs 50 --dim 64 --device cpu
 
 Dependencias entre fases:
   Phase 0 → Phase 1 → Phase 2 → Phase 3
+  Phase 0 → Phase 4 (reglas Horn, opcional)
                             → create_incident (CBR + KGE + LLM)
-  build_eval → 6_full (evaluación end-to-end)
+  build_eval → 6 (evaluación end-to-end)
 """
 
 import argparse
@@ -118,7 +122,7 @@ def _stop_logging(tee: "_Tee | None"):
 # ---------------------------------------------------------------------------
 
 def run_phase0(test_ratio=None, seed=None):
-    from phase0_preprocess import run
+    from phase0_split import run
     kwargs = {}
     if test_ratio is not None:
         kwargs["test_ratio"] = test_ratio
@@ -152,8 +156,14 @@ def run_phase3(top_k=None, kge_model=None):
     run(top_k=top_k or cfg.TOP_K_PREDICT, model_name=kge_model or 'TransE')
 
 
+def run_phase4_rules():
+    """Aprende reglas Horn con AnyBURL (opcional; requiere Java). Fuera de --phase all."""
+    from phase4_learn_rules import run
+    run()
+
+
 def run_create_incident(kge_model=None, llm_model=None, no_llm=False, top_k=10):
-    from phase4_incident_creator import run
+    from phase5_incident_creator import run
     run(
         kge_model_name=kge_model or 'TransE',
         use_llm=not no_llm,
@@ -162,7 +172,7 @@ def run_create_incident(kge_model=None, llm_model=None, no_llm=False, top_k=10):
     )
 
 
-def run_phase6_full(kge_model=None, top_k=None, eval_jsonl=None):
+def run_phase6(kge_model=None, top_k=None, eval_jsonl=None):
     """Eval end-to-end del incident creator (cascada REGLA → KGE+CBR sobre data/evaluacion/test_eval_*.jsonl)."""
     from phase6_eval_incident_creator import run, DEFAULT_EVAL_JSONL
     run(
@@ -175,9 +185,7 @@ def run_phase6_full(kge_model=None, top_k=None, eval_jsonl=None):
 def run_build_eval(n=500, seed=None, ttl=None, out=None):
     """Construye data/evaluacion/test_eval_<N>.jsonl + resumen de skips en
     out/evaluacion/test_eval_<N>_skips.txt"""
-    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
-    sys.path.insert(0, str(scripts_dir))
-    from build_eval_incidents import build_and_save
+    from phase6_build_eval import build_and_save
 
     ttl_path = Path(ttl) if ttl else cfg.TEST_TTL
     out_dir  = Path(out) if out else cfg.DATA_DIR / "evaluacion"
@@ -199,7 +207,7 @@ def main():
     parser.add_argument(
         "--phase",
         default="all",
-        choices=["all", "0", "1", "2", "2_plots", "3", "6_full",
+        choices=["all", "0", "1", "2", "2_plots", "3", "4", "6",
                  "build_eval", "create_incident"],
         help="Fase a ejecutar (default: all)",
     )
@@ -224,13 +232,13 @@ def main():
                         help=f"Modelo HuggingFace para LLM (default: {cfg.DEFAULT_MODEL})")
     parser.add_argument("--no-llm", action="store_true",
                         help="Desactivar LLM (solo KGE)")
-    # Opciones build_eval / 6_full
+    # Opciones build_eval / 6
     parser.add_argument("--n",           type=int, default=500,
                         help="Nº de incidencias para build_eval (default: 500)")
     parser.add_argument("--seed",        type=int, default=None,
                         help=f"Semilla para build_eval (default: {cfg.RANDOM_SEED})")
     parser.add_argument("--eval-jsonl",  default=None,
-                        help="JSONL de evaluación para --phase 6_full "
+                        help="JSONL de evaluación para --phase 6 "
                              "(default: data/evaluacion/test_eval_500.jsonl)")
 
     args = parser.parse_args()
@@ -261,8 +269,10 @@ def main():
             run_phase2_plots(kge_model=args.kge_model)
         elif p == "3":
             run_phase3(top_k=args.top_k, kge_model=args.kge_model)
-        elif p == "6_full":
-            run_phase6_full(
+        elif p == "4":
+            run_phase4_rules()
+        elif p == "6":
+            run_phase6(
                 kge_model=args.kge_model,
                 top_k=args.top_k,
                 eval_jsonl=args.eval_jsonl,

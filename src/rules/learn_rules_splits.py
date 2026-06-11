@@ -8,17 +8,17 @@ Por cada train_full_*.ttl:
   4. Almacena las reglas en data/reglas/<nombre_del_split>/
 
 Uso:
-    python scripts/learn_rules_splits.py
+    python src/run_pipeline.py --phase 4
+    python src/rules/learn_rules_splits.py                       # todos los splits
+    python src/rules/learn_rules_splits.py train_full_incidents  # solo algunos
 """
 
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
-# Reutiliza la conversion N3->TSV y la localizacion de java ya existentes
-from learn_rules_anyburl import n3_to_tsv, download_jar, _find_java
-
-BASE_DIR   = Path(__file__).parent.parent
+BASE_DIR   = Path(__file__).resolve().parents[2]   # src/rules/ → src/ → raíz del repo
 SPLITS_DIR = BASE_DIR / "data" / "train_splits"
 REGLAS_DIR = BASE_DIR / "data" / "reglas"
 JAR_FILE   = BASE_DIR / "AnyBURL-23-1x.jar"
@@ -34,6 +34,122 @@ XMX                           = "12G"
 # hasIntervention se excluye: las intervenciones se introducen a mano en el
 # incident creator, no se predicen con reglas, y sólo añaden ruido al aprendizaje.
 EXCLUDE_PREDS = {"hasDedicationTimeMin", "createdOn", "hasIntervention"}
+
+# --- AnyBURL: conversión N3→TSV, descarga del JAR y localización de Java ---
+# (antes vivían en scripts/learn_rules_anyburl.py)
+PREFIX      = "repcon:"
+ANYBURL_URL = "https://web.informatik.uni-mannheim.de/AnyBURL/AnyBURL-23-1x.jar"
+
+
+def n3_to_tsv(n3_path: Path, out_path: Path, exclude_preds: set[str] | None = None) -> int:
+    """
+    Convierte un fichero N3 con prefijo 'repcon:' al formato plano de AnyBURL:
+        sujeto<TAB>predicado<TAB>objeto
+
+    Maneja la sintaxis Turtle compacta:
+      repcon:X repcon:p1 repcon:v1 ;
+               repcon:p2 repcon:v2 .
+
+    exclude_preds: conjunto de predicados (nombre local, sin prefijo) a omitir.
+                   Las tripletas con esos predicados no se escriben en el TSV.
+    """
+    print(f"[1/4] Convirtiendo {n3_path.name} → {out_path.name} ...")
+
+    exclude = exclude_preds or set()
+
+    def strip_prefix(token: str) -> str:
+        token = token.rstrip(" ;.,")
+        if token.startswith(PREFIX):
+            return token[len(PREFIX):]
+        return token
+
+    n_triples = 0
+    n_excluded = 0
+    current_subject = None
+
+    with open(n3_path, "r", encoding="utf-8") as fin, \
+         open(out_path, "w", encoding="utf-8") as fout:
+
+        for raw_line in fin:
+            line = raw_line.strip()
+
+            # Saltar líneas vacías, comentarios y @prefix
+            if not line or line.startswith("#") or line.startswith("@prefix"):
+                continue
+
+            # Detectar si la línea empieza con un sujeto (no con espacio)
+            if not raw_line[0].isspace():
+                parts = line.split(None, 2)
+                if len(parts) < 3:
+                    continue
+                current_subject = strip_prefix(parts[0])
+                pred  = strip_prefix(parts[1])
+                obj   = strip_prefix(parts[2])
+                if current_subject and pred and obj:
+                    if pred in exclude:
+                        n_excluded += 1
+                    else:
+                        fout.write(f"{current_subject}\t{pred}\t{obj}\n")
+                        n_triples += 1
+            else:
+                # Continuación con el mismo sujeto (línea indentada)
+                if current_subject is None:
+                    continue
+                parts = line.split(None, 1)
+                if len(parts) < 2:
+                    continue
+                pred = strip_prefix(parts[0])
+                obj  = strip_prefix(parts[1])
+                if pred and obj:
+                    if pred in exclude:
+                        n_excluded += 1
+                    else:
+                        fout.write(f"{current_subject}\t{pred}\t{obj}\n")
+                        n_triples += 1
+
+    print(f"        {n_triples:,} triples escritos.")
+    if exclude:
+        print(f"        {n_excluded:,} triples excluidos (predicados: {', '.join(sorted(exclude))}).")
+    return n_triples
+
+
+def download_jar(jar_path: Path) -> None:
+    if jar_path.exists():
+        print(f"[2/4] Jar ya existe: {jar_path.name}")
+        return
+    print(f"[2/4] Descargando AnyBURL desde {ANYBURL_URL} ...")
+    try:
+        urllib.request.urlretrieve(ANYBURL_URL, jar_path)
+        print(f"        Descargado ({jar_path.stat().st_size / 1e6:.1f} MB).")
+    except Exception as e:
+        print(f"[!] Error descargando AnyBURL: {e}")
+        print(f"    Descárgalo manualmente de https://web.informatik.uni-mannheim.de/AnyBURL/")
+        print(f"    y colócalo en: {jar_path}")
+        sys.exit(1)
+
+
+def _find_java() -> str:
+    """Devuelve la ruta a java, instalándolo con install-jdk si no está disponible."""
+    import shutil
+
+    java = shutil.which("java")
+    if java:
+        return java
+
+    print("  [!] 'java' no encontrado. Instalando OpenJDK 17 via pip (install-jdk) ...")
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--no-user", "-q", "install-jdk"],
+        check=True,
+    )
+    import jdk as _jdk
+    print("      Descargando JDK 17 (puede tardar un momento) ...")
+    jdk_dir = _jdk.install("17")
+    java_bin = Path(jdk_dir) / "bin" / "java"
+    if not java_bin.exists():
+        print(f"  [!] Binario no encontrado en {java_bin}")
+        sys.exit(1)
+    print(f"        Java listo: {java_bin}")
+    return str(java_bin)
 
 
 def write_config(config_path: Path, tsv_path: Path, out_dir: Path) -> None:
@@ -53,14 +169,23 @@ WORKER_THREADS = {WORKER_THREADS}
     config_path.write_text(config, encoding="utf-8")
 
 
-def main():
+def main(requested: list[str] | None = None):
+    """
+    Aprende reglas para los splits indicados.
+
+    requested: lista de nombres de split (con o sin '.ttl'). Si es None se leen
+    de sys.argv (modo CLI). Pasa [] para procesar TODOS los splits sin depender
+    de argv — así lo invoca la Fase 4 (phase4_learn_rules.run()).
+    """
     if not SPLITS_DIR.exists():
         print(f"[!] No existe {SPLITS_DIR}")
         sys.exit(1)
 
-    # Si se pasan nombres de split por la línea de comandos, procesar solo esos.
-    # Ej.:  python scripts/learn_rules_splits.py train_full_incidents train_full_incidents_interventions
-    requested = [a.removesuffix(".ttl") for a in sys.argv[1:]]
+    # Nombres de split: por parámetro (Fase 4) o por línea de comandos (CLI).
+    # Ej. CLI:  python src/rules/learn_rules_splits.py train_full_incidents ...
+    if requested is None:
+        requested = sys.argv[1:]
+    requested = [a.removesuffix(".ttl") for a in requested]
     if requested:
         ttl_files = [SPLITS_DIR / f"{name}.ttl" for name in requested]
         missing = [t for t in ttl_files if not t.exists()]

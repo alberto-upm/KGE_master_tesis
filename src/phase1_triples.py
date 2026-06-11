@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from rdflib import RDF
 
 import config as cfg
-from graph_utils import load_graph, extract_label
+from utils.graph_utils import load_graph, extract_label
 
 
 # ---------------------------------------------------------------------------

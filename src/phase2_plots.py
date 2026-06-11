@@ -8,19 +8,26 @@ Contenido del módulo:
     _entity_type(label)            → clasifica por prefijo
     _TYPE_COLORS                   → paleta consistente con todo el proyecto
 
+  Muestreo
+    _stratified_sample(...)                  muestreo estratificado por tipo
+                                             (compartido por las variantes 2D y 3D)
+
   Funciones de plot (reutilizables desde otros módulos)
     _plot_loss_curve(losses, ...)            curva de pérdida del entrenamiento
-    _plot_tsne_embeddings_random(...)        t-SNE con muestreo aleatorio uniforme
+    _plot_tsne_embeddings_random(...)        t-SNE 2D con muestreo aleatorio uniforme
                                              (la "antigua": refleja la distribución
                                               real del grafo)
-    _plot_tsne_embeddings(...)               t-SNE con muestreo ESTRATIFICADO por
-                                             tipo (la "actual": balanceada, ideal
-                                              para ver si el KGE separa tipos)
+    _plot_tsne_embeddings(...)               t-SNE 2D con muestreo ESTRATIFICADO por
+                                             tipo (balanceada, ideal para ver si el
+                                              KGE separa tipos)
+    _plot_tsne_embeddings_3d(...)            t-SNE 3D estratificado (revela estructura
+                                              que el 2D solapa)
 
   CLI standalone
     python src/phase2_plots.py --kge-model TransE
     python src/phase2_plots.py --kge-model RotatE --n-per-type 5000
     python src/phase2_plots.py --kge-model TransE --skip-tsne
+    python src/phase2_plots.py --kge-model TransE --skip-3d
     python src/phase2_plots.py --kge-model TransE --skip-loss
 
 Lee de disco lo que phase2_kge_train.py dejó:
@@ -30,7 +37,9 @@ Lee de disco lo que phase2_kge_train.py dejó:
 
 Genera con timestamp nuevo:
   out/figures/<modelo>/loss_curve_<modelo>_<ts>.png
-  out/figures/<modelo>/tsne_entities_<modelo>_<ts>.png
+  out/figures/<modelo>/tsne_entities_<modelo>_random_<ts>.png
+  out/figures/<modelo>/tsne_entities_<modelo>_stratified_<ts>.png
+  out/figures/<modelo>/tsne_entities_<modelo>_stratified_3d_<ts>.png
 """
 
 import argparse
@@ -167,7 +176,7 @@ def _plot_tsne_embeddings_random(
         return
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"tsne_entities_{model_name.lower()}_{timestamp}.png"
+    out_path = out_dir / f"tsne_entities_{model_name.lower()}_random_{timestamp}.png"
 
     embs_np = entity_embs.detach().cpu().numpy() if hasattr(entity_embs, "detach") \
         else np.asarray(entity_embs)
@@ -211,42 +220,26 @@ def _plot_tsne_embeddings_random(
 # t-SNE — muestreo estratificado por tipo (versión actual)
 # ---------------------------------------------------------------------------
 
-def _plot_tsne_embeddings(
-    entity_embs,
-    factory,
-    model_name: str,
-    out_dir: Path,
-    timestamp: str,
-    n_per_type: int = 500,
-    seed: int = 42,
-) -> None:
+def _stratified_sample(entity_embs, factory, n_per_type: int, seed: int):
     """
-    t-SNE 2D con muestreo ESTRATIFICADO: hasta `n_per_type` entidades de
-    cada tipo (incident, company, employee, supportGroup, ...).
+    Muestreo ESTRATIFICADO por tipo: hasta `n_per_type` entidades de cada
+    tipo (incident, company, employee, supportGroup, ...).
 
-    Garantiza que todos los tipos aparezcan en el plot aunque sean
-    minoritarios. Es la vista recomendada para evaluar si el KGE separa
-    los tipos en su espacio de embeddings.
+    Garantiza que todos los tipos estén representados aunque sean
+    minoritarios. Reutilizado por las variantes 2D y 3D del t-SNE.
+
+    Devuelve (sample, types, n):
+      sample : np.ndarray [n, dim]  embeddings muestreados (parte real)
+      types  : list[str]            tipo de cada fila de sample
+      n      : int                  nº de entidades muestreadas
     """
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        from sklearn.manifold import TSNE
-        import numpy as np
-    except ImportError as e:
-        print(f"      [!] Falta dependencia para t-SNE ({e}); se omite.")
-        return
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"tsne_entities_{model_name.lower()}_{timestamp}.png"
+    import numpy as np
 
     embs_np = entity_embs.detach().cpu().numpy() if hasattr(entity_embs, "detach") \
         else np.asarray(entity_embs)
     if np.iscomplexobj(embs_np):
         embs_np = embs_np.real
 
-    # Muestreo estratificado por tipo
     rng = np.random.default_rng(seed)
     id_to_label = {v: k for k, v in factory.entity_to_id.items()}
 
@@ -269,11 +262,40 @@ def _plot_tsne_embeddings(
 
     idx = np.array(selected_ids, dtype=np.int64)
     sample = embs_np[idx]
-    labels = [id_to_label[int(i)] for i in idx]
-    types  = [_entity_type(l) for l in labels]
-    n = len(idx)
+    types  = [_entity_type(id_to_label[int(i)]) for i in idx]
+    return sample, types, len(idx)
 
-    print(f"      Calculando t-SNE sobre {n:,} entidades ...")
+
+def _plot_tsne_embeddings(
+    entity_embs,
+    factory,
+    model_name: str,
+    out_dir: Path,
+    timestamp: str,
+    n_per_type: int = 500,
+    seed: int = 42,
+) -> None:
+    """
+    t-SNE 2D con muestreo ESTRATIFICADO por tipo.
+
+    Es la vista recomendada para evaluar si el KGE separa los tipos en su
+    espacio de embeddings.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from sklearn.manifold import TSNE
+    except ImportError as e:
+        print(f"      [!] Falta dependencia para t-SNE ({e}); se omite.")
+        return
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"tsne_entities_{model_name.lower()}_stratified_{timestamp}.png"
+
+    sample, types, n = _stratified_sample(entity_embs, factory, n_per_type, seed)
+
+    print(f"      Calculando t-SNE 2D sobre {n:,} entidades ...")
     tsne = TSNE(n_components=2, random_state=seed, perplexity=30,
                 init="pca", learning_rate="auto")
     embs_2d = tsne.fit_transform(sample)
@@ -287,13 +309,70 @@ def _plot_tsne_embeddings(
                 c=color, label=f"{etype} ({len(mask)})",
                 alpha=0.6, s=15,
             )
-    plt.title(f"t-SNE de embeddings — {model_name}  "
+    plt.title(f"t-SNE 2D de embeddings — {model_name}  "
               f"(n={n:,}, estratificado)", fontsize=13)
     plt.legend(bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=9)
     plt.tight_layout()
     plt.savefig(out_path, dpi=120, bbox_inches="tight")
     plt.close()
-    print(f"      t-SNE      → {out_path}")
+    print(f"      t-SNE 2D   → {out_path}")
+
+
+# ---------------------------------------------------------------------------
+# t-SNE — 3 dimensiones (muestreo estratificado)
+# ---------------------------------------------------------------------------
+
+def _plot_tsne_embeddings_3d(
+    entity_embs,
+    factory,
+    model_name: str,
+    out_dir: Path,
+    timestamp: str,
+    n_per_type: int = 500,
+    seed: int = 42,
+) -> None:
+    """
+    t-SNE 3D con muestreo ESTRATIFICADO por tipo. Misma idea que la versión
+    2D pero proyectando a tres componentes, lo que a veces revela estructura
+    (clusters de tipos) que el 2D solapa.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registra proj 3d)
+        from sklearn.manifold import TSNE
+    except ImportError as e:
+        print(f"      [!] Falta dependencia para t-SNE 3D ({e}); se omite.")
+        return
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"tsne_entities_{model_name.lower()}_stratified_3d_{timestamp}.png"
+
+    sample, types, n = _stratified_sample(entity_embs, factory, n_per_type, seed)
+
+    print(f"      Calculando t-SNE 3D sobre {n:,} entidades ...")
+    tsne = TSNE(n_components=3, random_state=seed, perplexity=30,
+                init="pca", learning_rate="auto")
+    embs_3d = tsne.fit_transform(sample)
+
+    fig = plt.figure(figsize=(12, 9))
+    ax = fig.add_subplot(111, projection="3d")
+    for etype, color in _TYPE_COLORS.items():
+        mask = [i for i, t in enumerate(types) if t == etype]
+        if mask:
+            ax.scatter(
+                embs_3d[mask, 0], embs_3d[mask, 1], embs_3d[mask, 2],
+                c=color, label=f"{etype} ({len(mask)})",
+                alpha=0.6, s=15, depthshade=True,
+            )
+    ax.set_title(f"t-SNE 3D de embeddings — {model_name}  "
+                 f"(n={n:,}, estratificado)", fontsize=13)
+    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=9)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=120, bbox_inches="tight")
+    plt.close()
+    print(f"      t-SNE 3D   → {out_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +384,8 @@ def run(
     n_per_type:     int | None = None,
     do_loss:        bool = True,
     do_tsne:        bool = True,
+    do_tsne_3d:     bool = True,
+    do_random:      bool = False,
 ) -> None:
     model_lower    = kge_model_name.lower()
     out_model_dir  = cfg.model_dir(kge_model_name)
@@ -357,10 +438,20 @@ def run(
         print(f"        entity_embs shape: {list(entity_embs.shape)}")
         print(f"        Entidades en factory: {len(factory.entity_to_id):,}")
 
+        npt = n_per_type or cfg.TSNE_N_PER_TYPE
         _plot_tsne_embeddings(
             entity_embs, factory, kge_model_name, out_figures_dir, ts,
-            n_per_type=n_per_type or cfg.TSNE_N_PER_TYPE,
+            n_per_type=npt,
         )
+        if do_tsne_3d:
+            _plot_tsne_embeddings_3d(
+                entity_embs, factory, kge_model_name, out_figures_dir, ts,
+                n_per_type=npt,
+            )
+        if do_random:
+            _plot_tsne_embeddings_random(
+                entity_embs, factory, kge_model_name, out_figures_dir, ts,
+            )
     else:
         print("  [2/2] t-SNE omitido (--skip-tsne).")
 
@@ -379,6 +470,11 @@ if __name__ == "__main__":
                         help="No regenerar loss curve")
     parser.add_argument("--skip-tsne", action="store_true",
                         help="No regenerar t-SNE")
+    parser.add_argument("--skip-3d", action="store_true",
+                        help="No regenerar el t-SNE 3D (solo el 2D)")
+    parser.add_argument("--with-random", action="store_true",
+                        help="Generar también el t-SNE 2D de muestreo aleatorio "
+                             "(distribución real del grafo; desactivado por defecto)")
     args = parser.parse_args()
 
     run(
@@ -386,4 +482,6 @@ if __name__ == "__main__":
         n_per_type=args.n_per_type,
         do_loss=not args.skip_loss,
         do_tsne=not args.skip_tsne,
+        do_tsne_3d=not args.skip_3d,
+        do_random=args.with_random,
     )

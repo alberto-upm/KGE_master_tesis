@@ -1,9 +1,9 @@
 """
 Fase 6 — Evaluación end-to-end del pipeline de creación guiada (phase4).
 
-Lee el JSONL generado por `scripts/build_eval_incidents.py` (por defecto
+Lee el JSONL generado por `src/phase6_build_eval.py` (por defecto
 `data/evaluacion/test_eval_500.jsonl`) y, por cada incidencia, simula la
-cascada REGLA → KGE+CBR de phase4_incident_creator usando el valor real del
+cascada REGLA → KGE+CBR de phase5_incident_creator usando el valor real del
 JSONL como ground truth.
 
 Flujo por incidencia:
@@ -54,14 +54,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
-from phase4_incident_creator import (
+from phase5_incident_creator import (
     INCIDENT_PROPS,
     MULTI_VALUE_PROPS,
     _build_incidents_map_from_tsv,
     build_incidents_index,
     recommend_property,
 )
-from rule_engine_pyclause import RuleEnginePyClause
+from utils.rule_engine import RuleEnginePyClause
 
 try:
     from tqdm import tqdm
@@ -91,7 +91,7 @@ EVAL_PROPS = [p for p in INCIDENT_PROPS
 
 def _load_eval_jsonl(jsonl_path: Path) -> list[tuple[str, dict]]:
     """
-    Lee el JSONL producido por scripts/build_eval_incidents.py y devuelve una
+    Lee el JSONL producido por src/phase6_build_eval.py y devuelve una
     lista [(incident_id, ground_truth_dict)], filtrando sólo INCIDENT_PROPS.
     Los valores marcados como "skip" se conservan tal cual para que la
     evaluación los pueda saltar.
@@ -99,7 +99,7 @@ def _load_eval_jsonl(jsonl_path: Path) -> list[tuple[str, dict]]:
     if not jsonl_path.exists():
         raise FileNotFoundError(
             f"No encontrado: {jsonl_path}\n"
-            "Genéralo antes con:  python scripts/build_eval_incidents.py"
+            "Genéralo antes con:  python src/run_pipeline.py --phase build_eval"
         )
 
     prop_set = set(EVAL_PROPS) | set(USER_PROVIDED_PROPS)

@@ -109,15 +109,13 @@ def _model_config(model_lower: str, dim: int, margin: float) -> dict:
 # Plots de diagnóstico
 # ---------------------------------------------------------------------------
 # Las funciones de plot viven en phase2_plots.py. Aquí solo se importan.
-#   _plot_loss_curve              curva de pérdida
-#   _plot_tsne_embeddings_random  t-SNE con muestreo aleatorio uniforme
-#                                 (la que usamos al final de train(): refleja
-#                                  la distribución real del grafo)
-# La variante estratificada (_plot_tsne_embeddings) se invoca desde
-# phase2_plots.py vía CLI cuando quieras regenerar plots a posteriori.
+#   _plot_loss_curve       curva de pérdida
+#   _plot_tsne_embeddings  t-SNE 2D estratificado por tipo (balanceado)
+# Al final de train() se generan loss + t-SNE estratificado 2D. El t-SNE 3D
+# estratificado y el aleatorio se dejan para phase2_plots.py vía CLI.
 # ---------------------------------------------------------------------------
 
-from phase2_plots import _plot_loss_curve, _plot_tsne_embeddings_random
+from phase2_plots import _plot_loss_curve, _plot_tsne_embeddings
 
 
 def train(
@@ -256,16 +254,17 @@ def train(
     # así que se guardan en MAPS_DIR (ya generados por fase 1)
     # No es necesario volver a guardarlos aquí
 
-    # Plots de diagnóstico: curva de loss + t-SNE aleatorio (refleja la
-    # distribución real del grafo). Cada figura lleva en el nombre
-    # <modelo>_<timestamp> para que los entrenamientos sucesivos no se
-    # sobreescriban. Para la versión estratificada (balanceada por tipo)
-    # usa `python src/phase2_plots.py --kge-model <X>`.
+    # Plots de diagnóstico: curva de loss + t-SNE estratificado (balanceado por
+    # tipo, la vista útil para ver si el KGE separa tipos). Cada figura lleva en
+    # el nombre <modelo>_<kind>_<timestamp> para que los entrenamientos
+    # sucesivos no se sobreescriban. El t-SNE 3D estratificado (y el aleatorio,
+    # si se quiere) se generan aparte con `python src/phase2_plots.py --kge-model <X>`.
     plot_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_figures_dir = cfg.OUT_DIR / "figures" / model_name.lower()
     _plot_loss_curve(result, model_name, out_figures_dir, plot_ts)
-    _plot_tsne_embeddings_random(
+    _plot_tsne_embeddings(
         entity_embs, training, model_name, out_figures_dir, plot_ts,
+        n_per_type=cfg.TSNE_N_PER_TYPE,
     )
 
     # Resumen de métricas de test

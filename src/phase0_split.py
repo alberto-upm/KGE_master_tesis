@@ -19,7 +19,7 @@ Salida:
   data/test_eval_ids.json     (lista de IDs de incidencias de test)
 
 Uso:
-  python src/phase0_preprocess.py
+  python src/phase0_split.py
   python src/run_pipeline.py --phase 0
 """
 

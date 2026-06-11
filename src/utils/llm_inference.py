@@ -1,7 +1,7 @@
 """
 Fase 4 — Inferencia con LLM aumentado con contexto KGE.
 
-Librería usada por phase4_incident_creator para generar el resumen final de
+Librería usada por phase5_incident_creator para generar el resumen final de
 la incidencia. Expone:
 
   - KGEAugmentedLLM : cliente del servidor vLLM (API OpenAI-compatible)
@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
-from graph_utils import PRED_TEMPLATES_ES
+from utils.graph_utils import PRED_TEMPLATES_ES
 
 # ---------------------------------------------------------------------------
 # Prompt

@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 import config as cfg
-from phase4_incident_creator import (
+from phase5_incident_creator import (
     INCIDENT_PROPS, MULTI_VALUE_PROPS,
     _build_incidents_map_from_tsv, build_incidents_index,
     find_matching_incidents,
@@ -26,7 +26,7 @@ from phase4_incident_creator import (
 from phase3_link_prediction import (
     load_model_by_name, predict_tails_batch, _factory_cache,
 )
-from rule_engine_pyclause import RuleEnginePyClause
+from utils.rule_engine import RuleEnginePyClause
 
 
 SKIP = "skip"

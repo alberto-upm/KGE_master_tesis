@@ -18,7 +18,7 @@ Los bloques se copian intactos; solo se filtra por el tipo del sujeto.
 """
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]   # src/rules/ → src/ → raíz del repo
 SRC = ROOT / "data" / "train_full.ttl"
 OUT_DIR = ROOT / "data" / "train_splits"
 

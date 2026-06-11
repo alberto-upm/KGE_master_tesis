@@ -33,7 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
-from rule_engine_pyclause import RuleEnginePyClause as RuleEngine
+from utils.rule_engine import RuleEnginePyClause as RuleEngine
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +307,7 @@ def _build_incidents_map_from_tsv() -> dict:
 
     El pool CBR usa únicamente train.tsv (el 95% de entrenamiento). Las
     incidencias de test_eval.ttl se mantienen fuera para no contaminar las
-    métricas de la fase 6_full.
+    métricas de la fase 6.
     """
     if not cfg.TRAIN_TSV.exists():
         raise FileNotFoundError(
@@ -387,7 +387,7 @@ class IncidentCreatorSession:
             print(f"  [4/4] Conectando con LLM: {llm_model_name} ...")
             try:
                 from openai import OpenAI
-                from phase4_llm_inference import KGEAugmentedLLM
+                from utils.llm_inference import KGEAugmentedLLM
                 self._openai_client = OpenAI(
                     base_url=cfg.VLLM_BASE_URL, api_key="EMPTY"
                 )
@@ -412,7 +412,7 @@ class IncidentCreatorSession:
     def _llm_ask(self, prop: str, recs: list, incident: dict) -> str:
         """Genera una pregunta natural invitando al usuario a elegir entre las
         opciones que el KGE ha recomendado. NO menciona valores fuera de recs."""
-        from phase4_llm_inference import verbalize_props
+        from utils.llm_inference import verbalize_props
         label = _PROP_LABELS.get(prop, prop)
 
         filled = {k: v for k, v in incident.items() if v is not None}
@@ -876,7 +876,7 @@ class IncidentCreatorSession:
 
     def _finish(self, incident: dict) -> None:
         """Verbaliza, genera resumen LLM y guarda en JSONL."""
-        from phase4_llm_inference import verbalize_props
+        from utils.llm_inference import verbalize_props
 
         # ------------------------------------------------------------------
         # Auto-completado de campos finales (no entran en el wizard):

@@ -18,7 +18,7 @@ except ImportError:
 
 BASE_DIR    = Path(__file__).parent.parent
 DATA_DIR    = BASE_DIR / "data"
-TRAIN_TTL   = DATA_DIR / "train_full.ttl"   # generado por phase0_preprocess
+TRAIN_TTL   = DATA_DIR / "train_full.ttl"   # generado por phase0_split
 TEST_TTL    = DATA_DIR / "test_eval.ttl"
 
 TRIPLES_DIR = DATA_DIR / "triples"
@@ -41,7 +41,7 @@ IMPLICIT_RELS_FILE  = PRED_DIR / "implicit_relations.json"
 # Multi-model KGE
 # ---------------------------------------------------------------------------
 
-KGE_MODELS = ['TransE', 'RotatE', 'TransH', 'HAKE', 'DistMult', 'ComplEx', 'TorusE', 'PairRE']
+KGE_MODELS = ['TransE', 'RotatE', 'TransH', 'HAKE', 'DistMult', 'ComplEx', 'TorusE', 'PairRE', "ConvE"]
 
 
 def model_dir(model_name: str) -> Path:
