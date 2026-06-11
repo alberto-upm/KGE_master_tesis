@@ -19,7 +19,17 @@ La capa de reglas es **determinista y explicable**; el KGE+CBR es el **fallback 
 
 ## Arquitectura del Pipeline
 
-![Arquitectura general del sistema](figuras/General_2.png)
+<p align="center">
+  <img src="figuras/General_2.png" alt="Arquitectura general del sistema" width="600">
+</p>
+
+---
+
+## Modelo Semántico
+
+<p align="center">
+  <img src="figuras/Incident_Management.png" alt="Modelo semántico de gestión de incidencias" width="600">
+</p>
 
 ---
 
@@ -54,7 +64,7 @@ git clone https://github.com/symbolic-kg/PyClause
 cd PyClause
 pip install -e .
 ```
-
+<!--
 ### 3. Configurar Hugging Face 🤗
 
 ```bash
@@ -71,7 +81,7 @@ hf auth login
 ![HuggingFace Token Configuration](figuras/hugginface_token.png)
 
 - Introduce el token cuando se te solicite ✍️
-
+-->
 ---
 
 ## Configuración de Servidores
@@ -87,11 +97,13 @@ vllm serve meta-llama/Meta-Llama-3-8B-Instruct \
     --max-model-len 4096 \
     --tool-call-parser llama3_json
 ```
-
+<!--
 > **Nota sobre la GPU**: vLLM reserva casi toda la VRAM. Por eso, durante `create_incident` el modelo KGE se carga en **CPU** (el scoring de unos pocos proxies es trivial) y la GPU queda libre para vLLM. El entrenamiento (fase 2) y la evaluación (`6`) sí usan GPU.
 
 ---
+-->
 
+<!--
 ## Estructura del Repositorio
 
 ```
@@ -138,14 +150,14 @@ KGE_master_tesis/
 ├── requirements.txt
 └── README.md
 ```
-
+-->
 ---
 
 ## Ejecución del Pipeline paso a paso
 
 > Las dependencias entre fases son: **0 → 1 → 2 → 3 → 5 (create_incident)**, con la **fase 4 (reglas, opcional)** colgando de la fase 0, y **build_eval → 6** para la evaluación.
 
-### Fase 0 — Preprocesado (split train/eval)
+### Fase 0 — Partición de Datos (split train/eval)
 
 ```bash
 python src/run_pipeline.py --phase 0
@@ -186,7 +198,7 @@ Entrena con CUDA automáticamente. Modelos disponibles: **TransE, RotatE, TransH
 
 ```bash
 # Elegir otro modelo
-python src/run_pipeline.py --phase 2 --kge-model RotatE
+python src/run_pipeline.py --phase 2 --kge-model TransE
 
 # Entrenar todos los modelos secuencialmente (genera comparativa)
 python src/run_pipeline.py --phase 2 --all-models
@@ -204,7 +216,7 @@ python src/run_pipeline.py --phase 2 --epochs 50 --dim 64 --device cpu
 
 ```bash
 python src/run_pipeline.py --phase 3
-python src/run_pipeline.py --phase 3 --kge-model ComplEx
+python src/run_pipeline.py --phase 3 --kge-model TransE
 ```
 
 **Salida**: `out/predictions/implicit_relations.json` (top-K predicciones implícitas por entidad).
@@ -221,7 +233,7 @@ python src/run_pipeline.py --phase 4
 
 Internamente [`phase4_learn_rules.py`](src/phase4_learn_rules.py) orquesta:
 
-1. **`split_train_full.py`** — divide `data/train_full.ttl` por tipo de entidad del sujeto (`incident_`, `intervention_`, `employee_`) y genera en `data/train_splits/` los ficheros `train_full_incidents.ttl`, `train_full_interventions.ttl`, `train_full_incidents_interventions.ttl`, `train_full_interventions_employees.ttl` y `train_full_employees.ttl` (los bloques Turtle se copian intactos; solo se filtra por el tipo del sujeto).
+1. **`split_train_full.py`** — divide `data/train_full.ttl` por tipo de entidad del sujeto (`incident_`, `intervention_`, `employee_`) y genera en `data/train_splits/` los ficheros `train_full_incidents.ttl`, `train_full_interventions.ttl`, `train_full_incidents_interventions.ttl`, `train_full_interventions_employees.ttl` y `train_full_employees.ttl`.
 2. **`learn_rules_splits.py`** — procesa cada `train_full_*.ttl` de forma independiente: convierte `.ttl → .tsv`, escribe un `config-learn.properties` y ejecuta AnyBURL, guardando las reglas de cada split en `data/reglas/<nombre_del_split>/`. Descarga el JAR de AnyBURL e instala Java si falta.
 
 Las reglas quedan listas para cargarse en la fase 5 (`create_incident`) y en la evaluación (`6`) mediante PyClause. También puedes ejecutar cada script por separado (`python src/rules/split_train_full.py`, `python src/rules/learn_rules_splits.py`).
@@ -230,7 +242,7 @@ Las reglas quedan listas para cargarse en la fase 5 (`create_incident`) y en la 
 - Soporte mínimo: **10** predicciones correctas (`THRESHOLD_CORRECT_PREDICTIONS`)
 - Confianza mínima: **0.7** (`THRESHOLD_CONFIDENCE`)
 - Snapshots en **100 / 500 / 1000** (`rules-100`, `rules-500`, `rules-1000`)
-- Predicados excluidos del aprendizaje: `hasDedicationTimeMin`, `createdOn`, `hasIntervention` (se introducen a mano y solo añadirían ruido).
+- Predicados excluidos del aprendizaje: `hasDedicationTimeMin`, `createdOn`, `hasIntervention`.
 
 ---
 
@@ -262,7 +274,7 @@ python src/run_pipeline.py --phase create_incident
 
 **Cambiar el modelo KGE**:
 ```bash
-python src/run_pipeline.py --phase create_incident --kge-model DistMult
+python src/run_pipeline.py --phase create_incident --kge-model TransE
 ```
 
 ---
@@ -333,6 +345,7 @@ out/logs/pipeline_20260610_090011_phaseall.log
 
 El fichero captura toda la salida de la terminal (progreso, métricas, errores).
 
+<!--
 ---
 
 ## Literatura de Referencia
@@ -346,3 +359,4 @@ El fichero captura toda la salida de la terminal (progreso, métricas, errores).
 | *Neurosymbolic AI for Enhancing Instructability in Generative AI* | Sheth et al. (2023) |
 | *Anytime Bottom-Up Rule Learning for Large-Scale KG Completion* | Meilicke et al. (VLDB 2023) |
 | *PyClause — Simple and Efficient Rule Handling for Knowledge Graphs* | Betz et al. (IJCAI 2024) |
+-->
