@@ -2,13 +2,21 @@
 
 ## Descripción
 
-Sistema **neuro-simbólico end-to-end** para la creación guiada de incidencias técnicas. Combina tres fuentes de conocimiento en una **inferencia en cascada**, garantizando que siempre hay una respuesta y que cada sugerencia lleva su fuente de trazabilidad:
+Este proyecto implementa un sistema **neuro-simbólico end-to-end** para la creación guiada de incidencias técnicas. El sistema combina tres fuentes de conocimiento en una **inferencia en cascada**, garantizando que siempre hay una respuesta y que cada sugerencia lleva su fuente de trazabilidad:
 
+<!--
 | Capa | Método | Fuente | Cuándo actúa |
 |------|--------|--------|--------------|
 | 1 | Reglas simbólicas Horn (AnyBURL + PyClause) | `RULE` | Si existe una regla aplicable (y el usuario no la rechaza) |
 | 2 | Link prediction KGE + recuperación CBR (fusión WRRF) | `KGE` / `CBR` | Si no hay regla, o el usuario rechaza la regla |
 | 3 | LLM conversacional (verbalización + extracción) | `USUARIO` | Siempre (interfaz) |
+-->
+
+| Capa | Método | Fuente | Cuándo actúa |
+|------|--------|--------|--------------|
+| 1 | Reglas simbólicas Horn (AnyBURL + PyClause) | `RULE` | Si existe una regla aplicable |
+| 2 | Link prediction KGE + recuperación CBR | `KGE+CBR` | Si no hay regla |
+| 3 | LLM conversacional (verbalización) | `USUARIO` | Siempre (interfaz) |
 
 La capa de reglas es **determinista y explicable**; el KGE+CBR es el **fallback probabilístico** que siempre devuelve candidatos. El LLM nunca inventa valores: solo formula preguntas y extrae la elección del usuario entre opciones verificadas por el grafo.
 
