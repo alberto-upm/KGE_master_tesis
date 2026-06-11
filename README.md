@@ -21,6 +21,7 @@ Este proyecto implementa un sistema **neuro-simbólico end-to-end** para la crea
 La capa de reglas es **determinista y explicable**; el KGE+CBR es el **fallback probabilístico** que siempre devuelve candidatos. El LLM nunca inventa valores: solo formula preguntas y extrae la elección del usuario entre opciones verificadas por el grafo.
 
 **Dominio**: gestión de incidencias técnicas en español.
+
 **Entidades**: incidencias, técnicos (internos/externos), clientes, grupos/equipos/categorías de soporte, estados, tipos, orígenes, intervenciones.
 
 ---
@@ -254,7 +255,7 @@ Las reglas quedan listas para cargarse en la fase 5 (`create_incident`) y en la 
 
 Para cada campo de la incidencia el sistema sigue la **inferencia en cascada**:
 
-![Pipeline del Incident Creator](figuras/pipeline_incident_creator_horizontal.png)
+![Pipeline del Incident Creator](figuras/pipeline_incident_creator_vertical.png)
 
 1. **RULE** — PyClause comprueba si alguna regla AnyBURL infiere el valor. Si la hay, muestra la sugerencia con `rule_id` y `confidence`.
    - Aceptas (`s`/`Enter`) → el valor queda con fuente `RULE`.
