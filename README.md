@@ -28,7 +28,7 @@ La capa de reglas es **determinista y explicable**; el KGE+CBR es el **fallback 
 ## Arquitectura del Pipeline
 
 <p align="center">
-  <img src="figuras/General_2.png" alt="Arquitectura general del sistema" width="600">
+  <img src="figuras/General_2.png" alt="Arquitectura general del sistema" width="400">
 </p>
 
 ---
@@ -36,7 +36,7 @@ La capa de reglas es **determinista y explicable**; el KGE+CBR es el **fallback 
 ## Modelo Semántico
 
 <p align="center">
-  <img src="figuras/Incident_Management.png" alt="Modelo semántico de gestión de incidencias" width="600">
+  <img src="figuras/Incident_Management.png" alt="Modelo semántico de gestión de incidencias" width="400">
 </p>
 
 ---
