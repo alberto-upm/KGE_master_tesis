@@ -25,14 +25,6 @@ La capa de reglas es **determinista y explicable**; el KGE+CBR es el **fallback 
 
 ---
 
-## Arquitectura del Pipeline
-
-<p align="center">
-  <img src="figuras/General_2.png" alt="Arquitectura general del sistema" width="400">
-</p>
-
----
-
 ## Modelo Semántico
 
 <p align="center">
@@ -163,6 +155,10 @@ KGE_master_tesis/
 
 ## Ejecución del Pipeline paso a paso
 
+<p align="center">
+  <img src="figuras/General_2.png" alt="Arquitectura general del sistema" width="400">
+</p>
+
 > Las dependencias entre fases son: **0 → 1 → 2 → 3 → 5 (create_incident)**, con la **fase 4 (reglas, opcional)** colgando de la fase 0, y **build_eval → 6** para la evaluación.
 
 ### Fase 0 — Partición de Datos (split train/eval)
@@ -258,7 +254,7 @@ Las reglas quedan listas para cargarse en la fase 5 (`create_incident`) y en la 
 
 Para cada campo de la incidencia el sistema sigue la **inferencia en cascada**:
 
-![Pipeline del Incident Creator](figuras/pipeline_incident_creator_vertical.png)
+![Pipeline del Incident Creator](figuras/pipeline_incident_creator_horizontal.png)
 
 1. **RULE** — PyClause comprueba si alguna regla AnyBURL infiere el valor. Si la hay, muestra la sugerencia con `rule_id` y `confidence`.
    - Aceptas (`s`/`Enter`) → el valor queda con fuente `RULE`.
@@ -287,7 +283,7 @@ python src/run_pipeline.py --phase create_incident --kge-model TransE
 
 ---
 
-### Evaluación end-to-end
+### Fase 6 — Evaluación end-to-end
 
 **1) Construir el conjunto de evaluación** (extrae incidencias de `test_eval.ttl` a un JSONL; los campos ausentes se marcan `skip`):
 
