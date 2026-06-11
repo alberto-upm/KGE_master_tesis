@@ -256,7 +256,7 @@ Las reglas quedan listas para cargarse en la fase 5 (`create_incident`) y en la 
 Para cada campo de la incidencia el sistema sigue la **inferencia en cascada**:
 
 <p align="center">
-  <img src="figuras/pipeline_incident_creator_vertical.png" alt="Pipeline del Incident Creator" width="500">
+  <img src="figuras/pipeline_incident_creator_vertical.png" alt="Pipeline del Incident Creator" width="800">
 </p>
 
 1. **RULE** — PyClause comprueba si alguna regla AnyBURL infiere el valor. Si la hay, muestra la sugerencia con `rule_id` y `confidence`.
